@@ -1,0 +1,163 @@
+#include "emulator/engine.hpp"
+#include "teaching/annotations.hpp"
+#include "teaching_rom.hpp"
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <stdexcept>
+#include <thread>
+
+using namespace observatory;
+void require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+void ready(Engine& e) {
+    int visibleFrames = 0;
+    for (int i = 0; i < 16; ++i) {
+        e.stepFrame();
+        auto state = e.snapshot();
+        if (state.frameKind == "VBlank frame" && state.playerX == 72 && ++visibleFrames == 2) return;
+    }
+    throw std::runtime_error("Teaching ROM did not initialize");
+}
+int spriteLeft(const Snapshot& s) {
+    auto darkness = [](std::uint32_t p) { return ((p>>16)&255) + ((p>>8)&255) + (p&255); };
+    auto darkest = *std::min_element(s.pixels.begin(),s.pixels.end(),[&](auto a,auto b) { return darkness(a)<darkness(b); });
+    int left = 160;
+    for (int y = 0; y < 144; ++y) for (int x = 0; x < 160; ++x) {
+        if (s.pixels[y*160+x] == darkest) left = std::min(left,x);
+    }
+    return left;
+}
+void parity() {
+    Engine traced(128), plain(128); plain.setTraceEnabled(false);
+    require(traced.stateBytes() == plain.stateBytes(),"Reset states differ");
+    for (int frame = 0; frame < 90; ++frame) {
+        for (auto button : {Button::Right,Button::Left,Button::Up,Button::Down}) {
+            bool down = (button == Button::Right && frame >= 8 && frame < 25) ||
+                        (button == Button::Left && frame >= 30 && frame < 38) ||
+                        (button == Button::Up && frame >= 45 && frame < 52) ||
+                        (button == Button::Down && frame >= 60 && frame < 67);
+            traced.setButton(button,down); plain.setButton(button,down);
+        }
+        require(traced.stepFrame().completedFrame && plain.stepFrame().completedFrame,"Frame did not complete");
+        require(traced.stateBytes() == plain.stateBytes(),"Tracing changed full SameBoy save-state bytes");
+        auto a = traced.snapshot(), b = plain.snapshot();
+        require(a.registers == b.registers && a.memory == b.memory && a.sprite == b.sprite && a.pixels == b.pixels && a.ticks == b.ticks && a.instructions == b.instructions,"Trace parity snapshot mismatch");
+        require(traced.traceSize() <= traced.traceCapacity(),"Trace exceeded capacity");
+    }
+    auto a = traced.snapshot();
+    require(a.evictedWrites > 0,"Eviction was not reported");
+    require(plain.traceSize() == 0,"Disabled tracing captured writes");
+    std::cout << "PASS trace on/off: 90 frames, controlled 4-direction input, full state/register/memory/OAM/pixels/ticks parity\n";
+}
+void steppingAndMovement() {
+    Engine e; ready(e);
+    auto before = e.snapshot();
+    require(before.playerX == 72 && before.sprite[1] == 80,"Initial position/OAM wrong");
+    const auto initialImage = before.pixels;
+    const auto oldLeft = spriteLeft(before);
+    e.setButton(Button::Right,true);
+    bool reached = false;
+    for (int n = 0; n < 40000; ++n) {
+        auto s = e.snapshot();
+        if (s.next.pc == demo::write_player_x_right) { before = s; reached = true; break; }
+        auto step = e.stepInstruction();
+        auto after = e.snapshot();
+        require(step.executedInstruction && after.instructions == s.instructions + 1,"Instruction step executed other than one opcode");
+        require(after.next.pc == after.registers.pc && after.ticks == s.ticks + step.advancedTicks,"Instruction view/cursor not synchronized");
+    }
+    require(reached,"Right write instruction not reached");
+    const auto step = e.stepInstruction(); auto after = e.snapshot();
+    require(step.executedInstruction && after.instructions == before.instructions+1,"Write step wrong count");
+    require(after.playerX == before.playerX+1 && after.memory[0] == after.playerX,"Named variable/memory not synchronized");
+    require(after.registers.pc == demo::write_player_x_right+3 && after.next.pc == after.registers.pc,"PC not at write's successor");
+    const auto& w = after.writes.back();
+    require(w.address == demo::player_x && w.instruction && w.instruction->pc == demo::write_player_x_right,"Write attributed to wrong instruction");
+    require(w.before == before.playerX && w.requested == after.playerX && w.after == after.playerX && w.physicalStorage,"Write values not real storage");
+    require(w.startTicks == before.ticks && w.endTicks == after.ticks,"Write timestamp interval wrong");
+    require(after.pixels == before.pixels,"Instruction step invented a new completed frame");
+    e.setButton(Button::Right,false);
+    for (int n = 0; n < 50 && e.snapshot().next.pc != demo::write_oam_x; ++n) e.stepInstruction();
+    require(e.snapshot().next.pc == demo::write_oam_x,"OAM copy not reached");
+    e.stepInstruction(); after = e.snapshot();
+    require(after.sprite[1] == after.playerX+8,"OAM X not synchronized with position");
+    require(after.writes.back().instruction->pc == demo::write_oam_x,"OAM writer identity wrong");
+    auto oldFrames = after.frames; auto frameStep = e.stepFrame(); auto output = e.snapshot();
+    require(frameStep.completedFrame && output.frames == oldFrames+1,"Frame step advanced other than one output");
+    require(output.frameBoundaryTicks == output.ticks && output.next.pc == output.registers.pc,"Frame-step cursor mismatch");
+    if (output.pixels == initialImage || spriteLeft(output) != oldLeft+1) {
+        std::cerr << "Sprite diagnostic: left " << oldLeft << " → " << spriteLeft(output)
+                  << ", output=" << output.frames << " kind=" << output.frameKind
+                  << " x=" << unsigned(output.playerX) << " oam=" << unsigned(output.sprite[1]) << '\n';
+    }
+    require(output.pixels != initialImage && spriteLeft(output) == oldLeft+1,"Button did not move rendered sprite by one pixel");
+    require(e.inspect(0xE000) == e.inspect(0xC000) && canonicalAddress(0xE000) == 0xC000,"WRAM echo not resolved");
+    e.setTraceEnabled(false); require(e.traceSize()==0,"Capture not invalidated when disabled");
+    e.stepFrame(); e.setTraceEnabled(true); require(e.traceSize()==0,"Old writer survived an unobserved interval");
+    std::cout << "PASS instruction/frame stepping, synchronized views, real writer, Right→player_x→OAM→one-pixel frame movement, echo aliases\n";
+}
+void safetyAndBounds() {
+    Engine e(16); ready(e);
+    auto state = e.stateBytes();
+    for (unsigned base = 0; base <= 0xFF80; base += 128) {
+        e.snapshot(base);
+        if (e.stateBytes() != state) { std::cerr << "Inspection diagnostic: state changed at window " << hex(base) << '\n'; break; }
+    }
+    require(e.stateBytes() == state,"Inspection changed emulator state");
+    auto s = e.snapshot(); auto again = e.snapshot();
+    require(s.registers==again.registers && s.ticks==again.ticks && s.memory==again.memory,"Paused state advanced");
+    bool rejected = false; std::array<std::uint8_t,256> invalid{};
+    try { e.loadRom(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && e.stateBytes()==state,"Invalid ROM damaged current emulation");
+    auto target = e.ticks() + ticksPerSecond;
+    const auto start = std::chrono::steady_clock::now();
+    e.advanceTo(target,std::chrono::microseconds(3000));
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-start).count();
+    require(e.ticks()<target,"UI quantum ignored budget");
+    auto benchmarkStart = std::chrono::steady_clock::now();
+    for (int i = 0; i < 300; ++i) { e.setButton(Button::Right,i<200); e.stepFrame(); }
+    auto benchmarkUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-benchmarkStart).count();
+    require(e.traceSize()==16 && e.snapshot().evictedWrites>0,"Bounded capture failed under sustained run");
+    require(e.inspect(demo::player_x)<=152,"Movement escaped screen bounds");
+    bool wrongOwner = false;
+    std::thread other([&] { try { e.snapshot(); } catch(const std::logic_error&) { wrongOwner=true; } }); other.join();
+    require(wrongOwner,"Non-owner access was permitted");
+    auto otherRom = demo::rom; otherRom[0x3000]=1; e.loadRom(otherRom);
+    require(!e.snapshot().teaching && addressName(0xC000,false).empty(),"Unrecognized ROM received invented semantic names");
+    std::cout << "PASS pure inspection/pause, invalid load, ownership, bounded 300-frame run, unannotated-ROM safety; 3ms quantum observed " << elapsed << " us\n";
+    std::cout << "MEASURE traced sustained run: " << benchmarkUs / 300.0 << " us/frame (16.74 ms hardware frame period); no real-time guarantee\n";
+}
+void interruptAndHalt() {
+    auto rom = demo::rom;
+    // Original controlled fixture: enable a pending VBlank interrupt, then halt.
+    const std::uint8_t code[] = {0xF3,0x31,0xFF,0xDF,0x3E,0x01,0xE0,0x0F,0xEA,0xFF,0xFF,0xFB,0x00,0x00,0x76};
+    std::copy(std::begin(code),std::end(code),rom.begin()+0x150);
+    rom[0x40]=0xF3; rom[0x41]=0x76;
+    Engine e; e.loadRom(rom);
+    bool interruptWrite = false, halted = false;
+    for (int n = 0; n < 40; ++n) {
+        e.stepInstruction(); auto s=e.snapshot();
+        for (const auto& w : s.writes) {
+            if (w.address==0xDFFE || w.address==0xDFFD) {
+                require(!w.instruction,"Interrupt stack write inherited a stale opcode identity");
+                interruptWrite=true;
+            }
+        }
+        if (s.lastExecuted && s.lastExecuted->pc==0x41) { halted=true; break; }
+    }
+    require(interruptWrite && halted,"Interrupt/HALT fixture did not run");
+    auto before=e.snapshot(); auto result=e.stepInstruction(); auto after=e.snapshot();
+    require(!result.executedInstruction && after.instructions==before.instructions,"HALT wait reported an opcode");
+    require(after.ticks>before.ticks && after.next.pc==after.registers.pc,"HALT time/cursor not synchronized");
+    std::cout << "PASS interrupt writes have no stale opcode attribution; HALT step reports no opcode and exact advanced cursor\n";
+}
+void decode() {
+    require(disassemble({0x200,{0xEA,0x00,0xC0}})=="LD [$C000], A","LD disassembly wrong");
+    require(disassemble({0x200,{0xCB,0x47,0}})=="BIT 0, A","CB disassembly wrong");
+    require(disassemble({0x200,{0x20,0xFC,0}})=="JR NZ, $01FE","Relative disassembly wrong");
+    require(instructionLength(0xEA)==3 && instructionLength(0xCB)==2 && instructionLength(0x76)==1,"Instruction length wrong");
+}
+int main() {
+    try { decode(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); }
+    catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
+    return 0;
+}

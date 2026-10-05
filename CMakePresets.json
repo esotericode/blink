@@ -1,0 +1,15 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {"major": 3, "minor": 22, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "linux-release",
+      "displayName": "Linux native desktop release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "BUILD_TESTING": "ON"}
+    }
+  ],
+  "buildPresets": [{"name": "linux-release", "configurePreset": "linux-release"}],
+  "testPresets": [{"name": "linux-release", "configurePreset": "linux-release", "output": {"outputOnFailure": true}}]
+}

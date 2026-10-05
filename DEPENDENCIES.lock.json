@@ -1,0 +1,28 @@
+{
+  "reference_platform": "Ubuntu 24.04 x86-64",
+  "ubuntu_package_snapshot": "20260828T000000Z",
+  "sameboy": {
+    "repository": "https://github.com/LIJI32/SameBoy",
+    "release": "v1.0.3",
+    "commit": "208ba4afabffab9edde416f2dbb8ae459e34adb8",
+    "integrity": "third_party/sameboy/SHA256SUMS",
+    "local_modifications": false
+  },
+  "qt": {
+    "version": "6.4.2",
+    "ubuntu_package_version": "6.4.2+dfsg-21.1build5",
+    "packages": ["qt6-base-dev", "qt6-base-dev-tools", "qt6-qpa-plugins"],
+    "modules": ["Core", "Gui", "Widgets"],
+    "test_module": "Test",
+    "linkage": "shared",
+    "minimum_supported": "6.4",
+    "strict_cmake_option": "OBSERVATORY_STRICT_DEPENDENCIES"
+  },
+  "build_tools_tested": {
+    "gcc": "13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "python": "3.12.3"
+  },
+  "teaching_rom_sha256": "e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672"
+}

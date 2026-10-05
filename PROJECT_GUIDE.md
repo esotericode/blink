@@ -1,6 +1,37 @@
 # Console Observatory: project guide
 
-Working title. Living guide for people and AI contributors. Read alongside `AGENTS.md`; use `START_PROMPT.md` to begin implementation. This document records the initial direction, not an implemented product or a fixed final specification.
+Working title. Living guide for people and AI contributors. Read alongside `AGENTS.md`, `README.md`, `STATUS.md`, and `DECISIONS.md`. A first native Linux slice is implemented as of 2026-10-05; the broader goals below remain direction rather than claims of completed features.
+
+## Current implemented slice
+
+- Linux x86-64, C++20, Qt 6 Widgets (tested 6.4.2), CMake (tested 3.28.3).
+  SameBoy 1.0.3 DMG-B core is vendored at
+  `208ba4afabffab9edde416f2dbb8ae459e34adb8`, with no upstream modifications.
+- Original source-built teaching ROM and minimal original boot are embedded.
+  Arrow input updates named WRAM position variables and a visible star sprite.
+  Normal use is offline and native, with no web modules/services.
+- Run/pause, one-opcode step, next-output frame step, raw register/memory/OAM
+  snapshots, safe-storage disassembly, changed-value highlighting, and bounded
+  write-attempt evidence. Selecting memory follows its retained writer;
+  selecting a write selects its memory byte. Old evidence does not rewind state.
+- All state inspectors share the last atomic-step boundary. Completed display
+  output has its own labeled frame and enclosing boundary. Live opcode/write
+  summaries have explicit intervals. Write callbacks identify attempts before
+  acceptance; physical before/after values confirm the controlled demo.
+- CTest checks full-state trace parity, all-address-space inspection purity,
+  movement through WRAM/OAM to real pixels, stepping, interrupt/HALT semantics,
+  ownership, bounded growth, rendered Qt interactions, ROM reproducibility,
+  and vendored integrity. Native Qt tests ran under offscreen and virtual X11.
+  A physical desktop/compositor and cross-platform builds remain unverified.
+- Ubuntu `.deb` packaging and a desktop launcher are available; Qt remains
+  dynamically linked. See README for exact build/package commands and
+  `docs/VERIFICATION.md` for evidence. No installer install on a separate clean
+  machine is claimed.
+
+Next: pause on the position write, follow its OAM write and next visible frame,
+then add a storage-backed sprite/tile bitplane inspector. Add verified DMA hooks
+before supporting DMA-based movement lessons. Do not expand scope by presenting
+end-of-frame reconstruction as pixel provenance.
 
 ## Purpose
 
@@ -23,11 +54,11 @@ The eventual ambition includes CPU, memory, graphics, sound, timers, interrupts,
 
 | Choice | Initial direction | Reason |
 | --- | --- | --- |
-| Console | Original monochrome Game Boy; select one DMG model/revision | Small display and memory regions support a coherent whole-system explanation. |
-| Emulator | SameBoy C core, pinned to an identified revision | Reuse established emulation and debugging work; spend effort on instrumentation and education. |
-| Application | C++20, Qt 6 Widgets, CMake | Direct C integration, desktop controls, docking inspectors, and custom 2D drawing. |
-| First platform | One available desktop OS, explicitly identified | Prove the complete experience before promising cross-platform packages. |
-| Demo | Original small teaching ROM with symbols and source | Known variables and code make explanations reproducible. |
+| Console | Original monochrome Game Boy, DMG-B | Verified model available through SameBoy; memory and display support a coherent explanation. |
+| Emulator | SameBoy 1.0.3 C core; unchanged, vendored commit pin | Existing opcode/write hooks cover the first lesson without emulator patches. |
+| Application | C++20, Qt 6 Widgets, CMake | Native resizable inspectors and direct C integration; no web wrapper. |
+| First platform | Ubuntu 24.04 Linux x86-64 | Full slice compiled and tested; other platforms remain follow-up work. |
+| Demo | Original ROM/boot, assembly source and strict Python subset assembler | Source-defined variables, no proprietary startup ROM, deterministic build without RGBDS. |
 
 SameBoy documents a library build, debugger, and open-source replacement boot ROMs. Inspect its current APIs and licensing for the files actually used. Qt Widgets supplies desktop controls, model/view facilities, and a graphics-view framework. Verify the chosen Qt modules and distribution approach rather than assuming every dependency shares one license. See the primary references below.
 
@@ -64,7 +95,7 @@ A component diagram is a functional schematic unless verified against actual cir
 
 Separate the emulator adapter, trace/state model, native views, and teaching annotations. Use small interfaces that serve the first console; avoid designing a general emulator platform before its requirements exist.
 
-Give emulator execution one owner. Publish immutable snapshots or otherwise synchronized copies to the interface. UI inspection must not race with emulation or cause hardware side effects. Use safe debugger peeks; an inspection read must not become a simulated CPU read.
+Give emulator execution one owner. Publish immutable snapshots or otherwise synchronized copies to the interface. UI inspection must not race with emulation or cause hardware side effects. Verify debugger peeks rather than trusting their names; an inspection read must not become a simulated CPU read. The pinned `GB_safe_read_memory` can synchronize PPU/APU state in an IO window, so this slice uses public direct-storage access, with a tested literal-FF50 exception for boot mapping. IO is labeled raw storage rather than CPU bus readback.
 
 Timestamp events using a documented emulated clock unit, including the core's timing convention. Record instruction identity, access kind, address, bank where applicable, and values needed by the view. Distinguish CPU access, DMA, PPU fetches, and debugger inspection where supported; ordinary CPU callbacks may not cover every source.
 

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Console Observatory
+Comment=Follow game movement through CPU instructions and memory
+Exec=console-observatory
+Icon=console-observatory
+Terminal=false
+Categories=Education;Development;
+Keywords=Game Boy;emulator;CPU;memory;
