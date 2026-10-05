@@ -32,6 +32,10 @@ an unrelated directory. Default/minimum-size screenshots were inspected.
 Install output has no build RUNPATH; `.deb` control/data were inspected.
 Exact evidence and commands: `docs/VERIFICATION.md`.
 
+Independent GitHub Actions run 2 passed the Linux build, all four suites,
+ordinary `xvfb-run` native interactions, and install/package generation for
+implementation commit `a05d42798cc4c4f6cc00ffdfe314d66b85c24ea3`.
+
 ## Limits
 
 32 KiB ROM-only DMG; teaching boot rather than hardware startup; raw IO storage

@@ -59,4 +59,6 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   optional strict CMake mode requires Qt 6.4.2. Other Qt 6 versions are untested.
 - Four CTest suites and native X11 widget interactions pass. Linux CI is added
   with checkout v4.2.2 pinned by commit; remote CI results are separate from local
-  evidence. See `docs/VERIFICATION.md`.
+  evidence. See `docs/VERIFICATION.md`. Independent Actions run 2 subsequently
+  passed on a regular Ubuntu runner, confirming the ordinary dependency,
+  native X11, build/test, and package-generation commands.

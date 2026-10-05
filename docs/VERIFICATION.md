@@ -40,8 +40,16 @@ unchecked stdio-result warnings; no application-source warnings remained.
 | Package | Install tree and Ubuntu `.deb` generated and inspected: dependencies, executable, source/binary ROM, assembler, desktop/icon and license notices. Installed executable has no build RPATH/RUNPATH. |
 
 CTest: **4/4 passed**, about 1.18 seconds here. X11 widgets are an additional
-run; a headless engine alone is not presented as GUI validation. CI is provided
-but its remote execution is separate from these local results.
+run; a headless engine alone is not presented as GUI validation.
+
+Independent GitHub CI also passed:
+[Native Linux slice, run 2](https://github.com/esotericode/blink/actions/runs/37391274288),
+implementation commit `a05d42798cc4c4f6cc00ffdfe314d66b85c24ea3`. The regular
+Ubuntu 24.04 runner installed dependencies, built in strict Qt mode, passed all
+four suites and ordinary `xvfb-run` native interactions, and generated/inspected
+the install tree and `.deb`. This is separate from local measurements and does
+not establish a physical desktop or actual clean-machine package installation.
+The subsequent handoff update changes documentation only.
 
 The development-only virtual-X11 helper needed path relocation because this
 sandbox cannot write `/tmp` or provide `/usr/bin/xkbcomp`. Server/tests ran in
