@@ -26,7 +26,12 @@ SameBoy-supported games or desktop platforms. Newest first.
 | Engine (Wine 9.0) | All eleven groups pass. |
 | Widgets (Wine 9.0, native `windows` plugin) | Passes, with all screenshots written and inspected. **Found and fixed:** the extended suite crashed with a stack overflow, because each `Snapshot` held two 92 KB frames inline (about 193 KB) and MinGW's main thread has a 2 MiB stack; the app's load path also stacked several snapshot temporaries. Frames are now heap-backed vectors (always 23,040 pixels), making a snapshot about 9 KB. |
 
-GitHub Actions results for this version are recorded after the push below.
+### GitHub Actions (commit `c2ad784`)
+
+| Workflow | Result |
+| --- | --- |
+| [Linux run 11](https://github.com/esotericode/blink/actions/runs/37412613635) | Success: build, 4/4 CTest, X11 widget suite, package. |
+| [Windows run 7](https://github.com/esotericode/blink/actions/runs/37412613633) | Success with official Qt 6.8.3 MinGW: build, 4/4 CTest, widget suite on the native `windows` platform (both lessons, drag-and-drop MBC5 load, battery files), windeployqt install, CPack ZIP, and launch of the unzipped package with only System32 on `PATH`. Artifact (ZIP + screenshots): 13,724,836 bytes. |
 
 ## 2026-10-06 — Windows build, guided lesson, visual inspectors
 
