@@ -3,7 +3,32 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
-## 2026-10-06 — Review fixes (unreleased)
+## 2026-10-06 — Review of PR #2 before release 0.5.0
+
+Independent review of `codex/save-safety-and-learning-clarity` at `f3622b2`:
+- Checked against the pinned core: `GB_configure_cart` (MMM01 rotation, trailing
+  multicart header, TPP1, oversized ROM-only → MBC3, RAM-variant bump),
+  `rounded_rom_size`, `GB_save_battery_size` (TPP1 battery bit `$153` & 8), and
+  `GB_load_battery_from_buffer`. The legacy-RTC padding is needed: for a footer
+  shorter than 48 bytes the loader copies `MIN(48, total size)` bytes from just
+  past RAM. Accepted footers match the core's packed layouts (13, 44, 48;
+  HuC3/TPP1 native only).
+- Local results at `f3622b2`: 5/5 CTest, X11 widget suite, and the Qt-free
+  AddressSanitizer engine suite with leak detection (all pass here, in addition
+  to CI).
+- **Found and fixed:** (1) a failed save made closing and switching games
+  impossible, with no discard path, so the app could not be quit (even at
+  system shutdown) until the user found "Save elsewhere". Now a prompt offers
+  save elsewhere / discard / cancel (default Cancel); tests answer Cancel and
+  Discard. (2) The two-line picture label dropped the game from 2× to 1× at
+  the 980×680 minimum; it is one line again ("drawn N ms before now"), with
+  exact ticks in its tooltip. (3) Save-status links used Qt's default dark
+  blue on the dark theme; now the accent colour. (4) Four tooltips had become
+  jargon-heavy; reworded for newcomers without losing the qualification.
+- After the fixes: 5/5 CTest and the X11 widget suite pass; default and
+  minimum layouts, lesson stages, and the Cartridge panel re-inspected.
+
+## 2026-10-06 — Review fixes (PR #2, as submitted)
 
 - GCC 13.3 Qt-free engine build: existing checks plus transactional unsupported
   ROM rejection, malformed/short battery files, native controller save formats,

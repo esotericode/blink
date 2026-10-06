@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -371,15 +372,33 @@ int main(int argc, char** argv) {
         require(QDir().mkdir(failedPath), "Could not create failing save destination");
         const auto unsaved = window.engine().stateBytes();
         require(!window.saveBattery() && window.engine().batteryDirty(), "Save failure cleared dirty progress");
-        window.loadTeaching(); require(window.engine().stateBytes() == unsaved && !window.displayedSnapshot().teaching, "Failed save allowed a game change");
-        QCloseEvent close; QApplication::sendEvent(&window, &close);
-        require(!close.isAccepted() && window.engine().stateBytes() == unsaved, "Failed save allowed closing");
+        // When saving fails, the user is asked; answer the modal prompt from its event loop.
+        auto answer = [](const char* buttonName) {
+            QTimer::singleShot(0, [buttonName] {
+                auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                require(box && box->objectName() == "unsavedProgressPrompt", "Unsaved-progress prompt not shown");
+                auto* button = buttonName ? box->findChild<QAbstractButton*>(buttonName) : box->button(QMessageBox::Cancel);
+                require(button, "Unsaved-progress prompt button missing");
+                button->click();
+            });
+        };
+        answer(nullptr); window.loadTeaching();
+        require(window.engine().stateBytes() == unsaved && !window.displayedSnapshot().teaching, "Cancelling the prompt allowed a game change");
+        answer(nullptr); QCloseEvent close; QApplication::sendEvent(&window, &close);
+        require(!close.isAccepted() && window.engine().stateBytes() == unsaved, "Cancelling the prompt allowed closing");
         auto* saveStatus = window.findChild<QLabel*>("batteryStatus");
         require(saveStatus && saveStatus->text().contains("Could not save"), "Save error was not persistent");
         const auto recovered = dir.filePath("recovered.sav");
         require(window.saveBatteryAs(recovered) && !window.engine().batteryDirty() && window.batteryPath() == recovered, "Saving elsewhere did not recover progress");
         { QFile f(recovered); require(f.open(QIODevice::ReadOnly) && f.readAll().size() == 32768, "Recovered save has wrong size"); }
         window.loadTeaching();
+        // The user is never trapped: discarding unsaved progress lets them move on.
+        window.loadFile(ramPath); // its .sav path is now a directory, so the save is protected
+        window.runUntilWritten(0xA000);
+        require(window.engine().batteryDirty() && !window.saveBattery(), "Discard fixture is not dirty and unsaveable");
+        answer("discardProgressButton"); window.loadTeaching();
+        require(window.displayedSnapshot().teaching && !window.engine().batteryDirty() && QFileInfo(failedPath).isDir(),
+                "Discarding progress did not let the user open another game");
 
         // Rejected saves survive paused autosave and manual Save unchanged.
         const auto corruptRom = dir.filePath("corrupt.gb");

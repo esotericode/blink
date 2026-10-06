@@ -135,9 +135,10 @@ changes. Export capability comes from the core's public save-size API.
 The UI writes the
 buffer to `<rom folder>/<rom name>.sav`; that is file I/O outside emulation and
 does not change the emulated state.
-An independent timer saves while paused. Saving failure retains the current
-game on close/load; rejected existing files are protected until an explicit
-destination is chosen. The Cartridge panel displays persistent state/errors.
+An independent timer saves while paused. If saving fails on close/load, the
+user chooses: save elsewhere, discard the unsaved progress, or cancel (the
+default, which keeps the game). Rejected existing files are protected until an
+explicit destination is chosen. The Cartridge panel displays persistent state/errors.
 Writer lookup for cartridge RAM resolves `(bank × $2000 + offset) % RAM size`,
 including small-RAM mirrors. Historical selections retain their recorded bank
 beside the current mapping. Header and effective controller types are distinct

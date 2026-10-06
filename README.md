@@ -62,9 +62,10 @@ The Windows build is not code-signed, so SmartScreen may ask first
   a `.sav` file next to the ROM (same name), automatically every few seconds
   while it changes, when you open another game, and on exit (File › Save
   battery RAM now: Ctrl+S). The format is SameBoy's: raw RAM, plus a clock
-  footer for MBC3/HuC3/TPP1 clocks. Autosaving also works while paused. Failed
-  saving keeps the current game open; the Cartridge panel shows the destination
-  and error, with Retry and **Save battery RAM as** to recover elsewhere.
+  footer for MBC3/HuC3/TPP1 clocks. Autosaving also works while paused. If
+  saving fails, closing or opening another game asks first: save elsewhere,
+  discard the unsaved progress, or cancel and keep playing. The Cartridge panel
+  shows the destination and error, with Retry and **Save battery RAM as**.
   Unreadable or malformed existing saves are protected from automatic overwrite.
 - **OAM DMA as a writer**: most commercial games build their sprite table in
   work RAM and copy it into OAM with the hardware's DMA (writing a page number
@@ -172,7 +173,7 @@ cmake --install build --prefix out\install
 cpack --config build\CPackConfig.cmake -B out
 ```
 
-This writes `out\console-observatory-0.4.0-windows-x64.zip` (about 12 MB). Installing runs
+This writes `out\console-observatory-0.5.0-windows-x64.zip` (about 12 MB). Installing runs
 `windeployqt` (through Qt's CMake deployment support), which copies the Qt
 DLLs, platform and style plugins, the MinGW runtime, and a `qt.conf` beside
 `console-observatory.exe`. Unzip anywhere and run the `.exe`; the target
@@ -193,7 +194,7 @@ from one commit, runs the same checks as CI on each, and publishes them with
 in `CMakeLists.txt`, then push a tag:
 
 ```bash
-git tag v0.5.0 && git push origin v0.5.0
+git tag v0.6.0 && git push origin v0.6.0
 ```
 
 To release an earlier commit, run the workflow by hand (Actions › Release ›
@@ -237,7 +238,7 @@ The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 cmake --install build --prefix "$PWD/out/install"
 ./out/install/bin/console-observatory
 cpack --config build/CPackConfig.cmake -B out
-sudo apt install ./out/console-observatory_0.4.0_amd64.deb
+sudo apt install ./out/console-observatory_0.5.0_amd64.deb
 console-observatory
 ```
 

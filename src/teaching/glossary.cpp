@@ -72,7 +72,7 @@ const Map& entries() {
         {"action.savebatteryas", {"Save battery RAM elsewhere",
             "Choose another .sav destination for the current game. Use this if its folder is unwritable or an existing save could not be loaded. Saving successfully keeps future autosaves at the new location.", {}}},
         {"cart.save", {"Battery save status",
-            "Shows the destination, unsaved progress, and persistent errors. A failed save keeps this game open. An unreadable or malformed existing save is protected from automatic overwrite; save elsewhere to keep new progress.", {}}},
+            "Shows where this game saves and whether progress is unsaved. If saving fails, you are asked before closing or switching games. An unreadable existing save is never overwritten automatically; save elsewhere to keep new progress.", {}}},
         {"action.sprites", {"Sprite outlines",
             "Draw a box where the sprite table (OAM) places each sprite right now. After the CPU moves a sprite, the "
             "box moves first; the picture catches up when the next frame is drawn.", {}}},
@@ -86,12 +86,13 @@ const Map& entries() {
 
         // Status and picture.
         {"ui.badge", {"Paused or running",
-            "CPU and memory share one boundary. Pictures and captured evidence have their own labeled times. Running panels refresh about 30 times a second.",
+            "While paused, nothing changes until you step, so the panels describe one exact moment; the picture and "
+            "recorded writes are labelled with their own times. While running, panels refresh about 30 times a second.",
             {}}},
         {"ui.cursor", {"The shared moment",
             "t is emulated time since power-on, in ticks of 1/8,388,608 s (two per CPU clock cycle). Instruction # "
             "counts instructions run; output # counts finished screen pictures.",
-            "State inspectors share this boundary; the completed picture and past events have separate times."}},
+            "The CPU, memory and other state panels all show this point; the picture and recorded writes carry their own times."}},
         {"ui.game", {"The Game Boy screen",
             "The most recently finished 160×144 picture. When you step instruction by instruction it only changes "
             "once the console finishes drawing a new frame.",
@@ -100,7 +101,8 @@ const Map& entries() {
             "Pictures arrive once per frame, so the one on screen can be older than the CPU's current moment. "
             "\"VBlank frame\" is a normal finished picture.", {}}},
         {"ui.activity", {"Last update",
-            "Opcodes and captured CPU write attempts in the last published interval. Browsing while paused keeps that interval visible.", {}}},
+            "What happened in the last update: how many instructions ran, and how many times the CPU tried to write to each "
+            "kind of memory. Clicking around while paused keeps showing that last update.", {}}},
 
         // CPU registers and flags.
         {"reg.af", {"AF · accumulator and flags",
@@ -246,8 +248,9 @@ const Map& entries() {
         {"tiles.pixels", {"Colour numbers",
             "Each pixel's two bits combined: high bit × 2 + low bit gives 0–3. The palette then picks the shade.", {}}},
         {"tiles.source", {"Where OAM's contents came from",
-            "OAM can change through CPU stores or a hardware DMA copy. This view shows captured requests and later storage comparisons, not a per-byte transfer trace.",
-            "Click a source address for its current retained write evidence."}},
+            "OAM changes when the CPU stores to it, or when the game asks the hardware to copy 160 bytes in one go (OAM "
+            "DMA), usually from a table in work RAM. The app records each request and checks OAM afterwards; it can't "
+            "watch individual bytes move.", "Click the source address to see what the app recorded writing it."}},
 
         // Memory map.
         {"map.view", {"Memory map",

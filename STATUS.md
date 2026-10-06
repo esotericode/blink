@@ -2,7 +2,7 @@
 
 Native desktop teaching lab for Linux x86-64 and Windows x64. C++20 / Qt 6
 Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
-`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.4.0.
+`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.5.0.
 
 ## Works
 
@@ -26,8 +26,9 @@ Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
   bank code) with a two-page lesson that stops at the real switch.
 - **Battery saves**: `.sav` next to the ROM in SameBoy's format, loaded on
   open, written atomically every ~3 s while dirty, on game change, and on exit.
-  Saving also runs while paused. Failure blocks closing or changing the game;
-  persistent Cartridge status offers retry and saving elsewhere. Rejected
+  Saving also runs while paused. If saving fails, closing or changing the game
+  asks: save elsewhere, discard, or cancel (never a dead end); persistent
+  Cartridge status offers retry and saving elsewhere. Rejected
   existing saves are protected from automatic overwrite. Engine validation
   accepts complete RAM and recognized clock footers without touching the
   machine on rejection; restart retains unsaved battery state.

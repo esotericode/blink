@@ -655,7 +655,7 @@ void MainWindow::restart() {
     afterLoad();
 }
 void MainWindow::loadTeaching() {
-    pause(); if (!preserveBattery()) return;
+    pause(); if (!preserveBattery("opening another game")) return;
     engine_.loadTeaching(); warmTeaching();
     romName_ = "teaching game"; savePath_.clear();
     batteryProblem_.clear(); batteryBlocked_ = false;
@@ -704,7 +704,7 @@ bool MainWindow::loadBytes(const QByteArray& bytes, const QString& name, const Q
             .arg(name, q(cart.typeName), q(hex(cart.type, 2))));
         return false;
     }
-    if (!preserveBattery()) return false;
+    if (!preserveBattery("opening another game")) return false;
     try {
         engine_.loadRom(rom);
     } catch (const std::exception& error) { QMessageBox::warning(this, "Cannot load ROM", error.what()); return false; }
@@ -764,11 +764,38 @@ bool MainWindow::saveBatteryAs(const QString& path) {
     savePath_ = previousPath; batteryBlocked_ = blocked; updateBatteryStatus();
     return false;
 }
-bool MainWindow::preserveBattery() {
+bool MainWindow::preserveBattery(const QString& action) {
     if (!engine_.batteryDirty() || engine_.batteryData().empty()) return true;
     if (saveBattery()) return true;
     cartridgeDock_->show(); cartridgeDock_->raise();
-    statusBar()->showMessage("The current game has unsaved progress. Retry saving or use File → Save battery RAM as before closing or opening another game.");
+    // Never trap the user: they may keep the game open, save elsewhere, or
+    // knowingly discard the progress that cannot be written.
+    QMessageBox box(QMessageBox::Warning, "Unsaved game progress",
+        QString("This game's save could not be written%1, so its newest progress is only in memory.\n\n"
+                "Save it to another file before %2, or discard that progress?")
+            .arg(savePath_.isEmpty() ? QString() : " to " + QDir::toNativeSeparators(savePath_), action),
+        QMessageBox::NoButton, this);
+    box.setObjectName("unsavedProgressPrompt");
+    if (!batteryProblem_.isEmpty()) box.setInformativeText(batteryProblem_);
+    auto* elsewhere = box.addButton("Save elsewhere…", QMessageBox::AcceptRole);
+    elsewhere->setObjectName("saveElsewhereButton");
+    auto* discard = box.addButton("Discard progress", QMessageBox::DestructiveRole);
+    discard->setObjectName("discardProgressButton");
+    auto* cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.setEscapeButton(cancel);
+    box.exec();
+    if (box.clickedButton() == discard) {
+        engine_.clearBatteryDirty();
+        updateBatteryStatus();
+        statusBar()->showMessage("Discarded the unsaved battery progress.", 6000);
+        return true;
+    }
+    if (box.clickedButton() == elsewhere) {
+        const auto path = QFileDialog::getSaveFileName(this, "Save battery RAM elsewhere", savePath_, "Battery saves (*.sav);;All files (*)");
+        if (!path.isEmpty() && saveBatteryAs(path)) return true;
+    }
+    statusBar()->showMessage("The current game is still open with its unsaved progress. Retry saving or use File → Save battery RAM as.");
     return false;
 }
 void MainWindow::updateBatteryStatus() {
@@ -782,9 +809,13 @@ void MainWindow::updateBatteryStatus() {
         .arg(batteryBlocked_ ? "protected" : engine_.batteryDirty() ? "unsaved changes" : "saved / no pending changes",
              QDir::toNativeSeparators(savePath_).toHtmlEscaped());
     if (!batteryProblem_.isEmpty()) text += "<br>" + batteryProblem_.toHtmlEscaped();
-    if (!batteryBlocked_) text += "<br><a href='save:retry'>Save now / retry</a> · ";
+    // Links in the accent colour: Qt's default link blue is unreadable on the dark theme.
+    const auto link = [](const char* href, const char* label) {
+        return QString("<a href='%1' style='color:%2'>%3</a>").arg(href, style::accent.name(), label);
+    };
+    if (!batteryBlocked_) text += "<br>" + link("save:retry", "Save now / retry") + " · ";
     else text += "<br>Automatic saving is disabled for this file. ";
-    text += "<a href='save:elsewhere'>Save elsewhere</a>";
+    text += link("save:elsewhere", "Save elsewhere");
     batteryStatus_->setText(text);
 }
 QString MainWindow::romLabel(std::uint16_t address) const {
@@ -1040,9 +1071,14 @@ void MainWindow::refresh() {
     if (!note.empty()) text += q(note);
     instruction_->setText(text.trimmed());
     game_->setFrame(s);
-    frameLabel_->setText(QString("Picture: output #%1 · %2 · completed at t=%3\n%4 CPU cycles (%5 ms) before the current state")
-        .arg(s.frames).arg(q(s.frameKind)).arg(s.frameBoundaryTicks).arg((s.ticks - s.frameBoundaryTicks) / 2)
-        .arg(double(s.ticks - s.frameBoundaryTicks) * 1000 / ticksPerSecond, 0, 'f', 2));
+    // One line, so the game keeps 2x scale at the minimum window size; the
+    // exact completion tick lives in the tooltip.
+    const auto age = s.ticks - s.frameBoundaryTicks;
+    frameLabel_->setText(QString("Picture: output #%1 · %2 · drawn %3 ms before now")
+        .arg(s.frames).arg(q(s.frameKind)).arg(double(age) * 1000 / ticksPerSecond, 0, 'f', 2));
+    frameLabel_->setToolTip(tips::make(q(glossary("ui.frame").title), q(glossary("ui.frame").body),
+        QString("Output #%1 completed at t = %2 ticks; the CPU and memory panels show t = %3, %4 CPU cycles later.")
+            .arg(s.frames).arg(s.frameBoundaryTicks).arg(s.ticks).arg(age / 2)));
     for (int row = 0; row < 16; ++row) {
         cell(memory_, row, 0, q(hex(memoryBase_ + row * 8)));
         for (int c = 0; c < 8; ++c) {
@@ -1208,7 +1244,7 @@ void MainWindow::showEvent(QShowEvent* event) {
 }
 void MainWindow::closeEvent(QCloseEvent* event) {
     pause();
-    if (!preserveBattery()) { event->ignore(); return; }
+    if (!preserveBattery("closing")) { event->ignore(); return; }
     QMainWindow::closeEvent(event);
 }
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {

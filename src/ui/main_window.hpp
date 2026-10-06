@@ -72,7 +72,10 @@ private:
     void warmBankDemo();
     bool loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath);
     bool loadBatteryFile();
-    bool preserveBattery();
+    // Before closing or replacing the game: save dirty battery RAM, or ask the
+    // user (save elsewhere / discard / cancel) when saving fails. `action`
+    // completes "...before <action>", e.g. "closing".
+    bool preserveBattery(const QString& action);
     void updateBatteryStatus();
     void afterLoad();
     LessonStep idleLessonStep() const;

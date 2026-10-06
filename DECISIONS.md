@@ -255,7 +255,11 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   for displayed effective controller facts; retain the declared header type
   and explain disagreement.
 - Failed disk saving retains the engine. A rejected existing save is protected
-  until the user explicitly chooses a destination. An independent Qt timer
+  until the user explicitly chooses a destination. Closing or switching games
+  with progress that cannot be saved asks (save elsewhere / discard / cancel,
+  Cancel by default) instead of refusing outright: review found that a refusal
+  with no discard path could make the app impossible to quit, even at system
+  shutdown. An independent Qt timer
   saves dirty RAM while paused; restart carries unsaved battery status.
 - Last retained CPU attempts resolve banked/mirrored cartridge RAM storage.
   Historical selections name the recorded bank separately from the current
