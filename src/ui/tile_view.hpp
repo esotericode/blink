@@ -67,6 +67,7 @@ class TileInspector : public QWidget {
 public:
     explicit TileInspector(QWidget* parent = nullptr);
     void setSnapshot(const Snapshot& snapshot);
+    void resetSelection();
     void selectSprite(int index);
     void selectTile(int tile);
     int selectedSprite() const { return sprite_; }

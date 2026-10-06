@@ -4,6 +4,7 @@
 #include "teaching/annotations.hpp"
 #include "teaching_rom.hpp"
 #include "fixtures.hpp"
+#include <ctime>
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -464,8 +465,73 @@ void decode() {
     require(disassemble({0x200,{0x20,0xFC,0}})=="JR NZ, $01FE","Relative disassembly wrong");
     require(instructionLength(0xEA)==3 && instructionLength(0xCB)==2 && instructionLength(0x76)==1,"Instruction length wrong");
 }
+void reviewRegressions() {
+    // Failed loads must preserve the entire machine, not only its registers.
+    Engine e; e.loadRom(bankdemo::rom); readyBankDemo(e);
+    const auto before = e.stateBytes();
+    auto unsupported = std::vector<std::uint8_t>(demo::rom.begin(), demo::rom.end());
+    unsupported[0x147] = 0x55;
+    bool rejected = false;
+    try { e.loadRom(unsupported); } catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && e.stateBytes() == before && e.snapshot().bankDemo, "Unsupported cartridge replaced the current game");
+    const auto dirty = e.batteryDirty();
+    for (const std::size_t size : {0u, 8191u, 8193u, 8192u + 48u}) {
+        require(!e.loadBattery(std::vector<std::uint8_t>(size, 0x42)) && e.stateBytes() == before && e.batteryDirty() == dirty,
+                "Malformed battery save changed state");
+    }
+    require(e.loadBattery(std::vector<std::uint8_t>(8192, 0x33)) && e.inspect(0xA000) == 0x33 && !e.batteryDirty(), "Valid RAM save was rejected");
+    auto clock = unsupported; clock[0x147] = 0x10; clock[0x149] = 2;
+    e.loadRom(clock);
+    require(e.batteryData().size() == 8192 + 48, "Native clock save size wrong");
+    for (const std::size_t footer : {std::size_t(0), 5 + sizeof(time_t), std::size_t(44), std::size_t(48)}) {
+        require(e.loadBattery(std::vector<std::uint8_t>(8192 + footer, 0)), "Recognized RTC save format was rejected");
+    }
+    const auto clockBefore = e.stateBytes();
+    require(!e.loadBattery(std::vector<std::uint8_t>(8193)) && e.stateBytes() == clockBefore, "Short RTC footer was accepted");
+    for (const std::uint8_t type : {0x06, 0x09, 0x13, 0x1B, 0x22, 0xFC, 0xFE}) {
+        auto batteryRom = unsupported; batteryRom[0x147] = type; batteryRom[0x149] = 2;
+        e.loadRom(batteryRom);
+        const auto data = e.batteryData();
+        require(!data.empty() && e.loadBattery(data), "Native supported-controller save failed to round-trip");
+    }
+    auto tpp1 = unsupported;
+    tpp1[0x147] = 0xBC; tpp1[0x149] = 0xC1; tpp1[0x14A] = 0x65; tpp1[0x152] = 1; tpp1[0x153] = 8;
+    e.loadRom(tpp1);
+    require(e.batteryData().size() == 8192 + 20 && e.loadBattery(e.batteryData()), "TPP1 clock save failed to round-trip");
+    // The trailing MMM01 header wins over oversized ROM-only detection.
+    e.loadRom(multicartFixture());
+    auto s = e.snapshot();
+    require(s.cartridge.info.mbc == Mbc::Mmm01 && s.cartridge.info.type == 0 && s.cartridge.info.effectiveType == 0x0D &&
+            s.cartridge.info.battery && s.cartridge.ramBytes == 8192 && e.batteryData().size() == 8192 && s.cartridge.banks.rom0 == 2,
+            "Multicart metadata or battery disagrees with the core");
+    e.loadRom(multicartFixture(0x11));
+    require(e.snapshot().cartridge.info.mbc == Mbc::Mmm01 && e.batteryData().empty(), "MBC3-labelled MMM01 detection wrong");
+    auto contradictory = unsupported; contradictory[0x147] = 0x0F; contradictory[0x149] = 2;
+    e.loadRom(contradictory); s = e.snapshot();
+    require(s.cartridge.info.effectiveType == 0x10 && s.cartridge.info.ram && s.cartridge.info.timer &&
+            s.cartridge.ramBytes == 8192 && e.batteryData().size() == 8192 + 48, "RAM recovery lost controller features");
+    // Use the actual writes and the same storage predicate used by the UI.
+    e.loadRom(bankedRamFixture());
+    toCartridge(e, 0x150);
+    for (int i = 0; i < 14; ++i) e.stepInstruction();
+    s = e.snapshot(0xA000);
+    const auto w = std::find_if(s.writes.rbegin(), s.writes.rend(), [&](const auto& event) { return writerMatches(event, 0xA000, s.cartridge); });
+    require(s.cartridge.banks.ram == 0 && s.memory[0] == 0x11 && w != s.writes.rend() && w->bank == 0 && w->after == 0x11,
+            "Last writer came from another RAM bank");
+    require(e.batteryDirty(), "RAM writes did not mark progress dirty");
+    e.restart();
+    require(e.batteryDirty() && e.inspect(0xA000) == 0x11, "Restart forgot unsaved battery progress");
+    CartridgeState small; small.ramBytes = 2048;
+    WriteEvent mirror; mirror.address = mirror.canonicalAddress = 0xA800; mirror.bank = 3;
+    require(writerMatches(mirror, 0xA000, small), "Small cartridge RAM mirrors do not share writer evidence");
+    const auto wrap = std::uint64_t(2199023255552);
+    require(ticksForNanoseconds(wrap) >= ticksForNanoseconds(wrap - 1) &&
+            ticksForNanoseconds(3600ull * 1000000000) == 3600ull * ticksPerSecond &&
+            ticksForNanoseconds(24ull * 3600 * 1000000000) == 24ull * 3600 * ticksPerSecond, "Long-running pacing target wrapped");
+    std::cout << "PASS review regressions: transactional ROM/save validation, legacy RTC buffers, multicart battery, RAM recovery, bank-aware writers, long-run pacing\n";
+}
 int main() {
-    try { decode(); postBootState(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); bankedCartridge(); bankParityAndOtherCartridges(); oamDma(); }
+    try { decode(); postBootState(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); bankedCartridge(); bankParityAndOtherCartridges(); oamDma(); reviewRegressions(); }
     catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }

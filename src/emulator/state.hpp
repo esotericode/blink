@@ -11,6 +11,10 @@ namespace observatory {
 inline constexpr std::size_t screenPixels = 160 * 144;
 inline constexpr std::size_t memoryWindow = 128;
 inline constexpr std::uint64_t ticksPerSecond = 8388608;
+// Split before multiplying: ns * ticksPerSecond overflows after ~37 minutes.
+inline constexpr std::uint64_t ticksForNanoseconds(std::uint64_t ns) {
+    return ns / 1000000000 * ticksPerSecond + ns % 1000000000 * ticksPerSecond / 1000000000;
+}
 
 struct Registers {
     std::uint16_t af{}, bc{}, de{}, hl{}, sp{}, pc{};
@@ -141,6 +145,17 @@ struct StepResult {
     std::uint64_t advancedTicks{};
 };
 std::uint16_t canonicalAddress(std::uint16_t address);
+// Resolve cartridge RAM mirrors and banks to the same physical byte. ROM
+// writes remain controller commands identified by their bus address.
+inline bool writerMatches(const WriteEvent& event, std::uint16_t address, const CartridgeState& cartridge) {
+    if (address >= 0xA000 && address < 0xC000 && cartridge.ramBytes) {
+        if (event.address < 0xA000 || event.address >= 0xC000) return false;
+        const auto recorded = (std::size_t(event.bank) * 0x2000 + event.address - 0xA000) % cartridge.ramBytes;
+        const auto current = (std::size_t(cartridge.banks.ram) * 0x2000 + address - 0xA000) % cartridge.ramBytes;
+        return recorded == current;
+    }
+    return event.canonicalAddress == canonicalAddress(address);
+}
 std::string hex(std::uint64_t value, int width = 4);
 std::string disassemble(const Instruction& instruction);
 int instructionLength(std::uint8_t opcode);

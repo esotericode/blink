@@ -135,6 +135,11 @@ MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
     romName_ = "teaching game";
     refresh();
     setLessonStep(LessonStep::Start);
+    batteryTimer_.setParent(this); batteryTimer_.setObjectName("batteryAutosaveTimer");
+    batteryTimer_.setInterval(3000);
+    connect(&batteryTimer_, &QTimer::timeout, this, [this] {
+        if (engine_.batteryDirty() && !batteryBlocked_) saveBattery();
+    });
     batteryTimer_.start();
     connect(&timer_, &QTimer::timeout, this, [this] { tick(); });
     timer_.setInterval(1);
@@ -164,6 +169,7 @@ void MainWindow::buildActions() {
     auto* restartAction = action("Restart", "restartAction", QKeySequence("Ctrl+R"), [this] { restart(); });
     restartAction->setToolTip(tips::key("action.restart"));
     traceAction_ = action("Capture writes", "traceAction", {}, [this](bool on) {
+        leaveLesson();
         engine_.setTraceEnabled(on); selectedEvent_.reset(); refresh();
     });
     traceAction_->setCheckable(true);
@@ -189,6 +195,11 @@ void MainWindow::buildActions() {
         if (saveBattery()) statusBar()->showMessage("Saved battery-backed cartridge RAM to " + QDir::toNativeSeparators(savePath_), 6000);
     });
     saveBatteryAction_->setToolTip(tips::key("action.savebattery"));
+    saveBatteryAsAction_ = action("Save battery RAM as…", "saveBatteryAsAction", {}, [this] {
+        const auto path = QFileDialog::getSaveFileName(this, "Save battery RAM elsewhere", savePath_, "Battery saves (*.sav);;All files (*)");
+        if (!path.isEmpty()) saveBatteryAs(path);
+    });
+    saveBatteryAsAction_->setToolTip(tips::key("action.savebatteryas"));
     auto* quit = action("Quit", "quitAction", QKeySequence::Quit, [this] { close(); });
 
     auto* file = menuBar()->addMenu("&File");
@@ -197,6 +208,7 @@ void MainWindow::buildActions() {
     examples->setObjectName("examplesMenu");
     examples->addAction(teaching); examples->addAction(bankDemo);
     file->addAction(saveBatteryAction_);
+    file->addAction(saveBatteryAsAction_);
     file->addAction(restartAction);
     file->addSeparator(); file->addAction(quit);
     auto* emulation = menuBar()->addMenu("&Emulation");
@@ -391,6 +403,15 @@ void MainWindow::buildDocks() {
     memoryDock_ = makeDock("Memory", "memoryDock", mem);
 
     cartridge_ = new CartridgePanel;
+    batteryStatus_ = label({}, "batteryStatus");
+    batteryStatus_->setTextFormat(Qt::RichText);
+    batteryStatus_->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    batteryStatus_->setToolTip(tips::key("cart.save"));
+    qobject_cast<QVBoxLayout*>(cartridge_->layout())->insertWidget(1, batteryStatus_);
+    connect(batteryStatus_, &QLabel::linkActivated, this, [this](const QString& link) {
+        if (link == "save:retry") saveBattery();
+        else if (link == "save:elsewhere") saveBatteryAsAction_->trigger();
+    });
     // Scrolls rather than overlapping when the dock is short (e.g. the minimum window size).
     auto* cartridgeScroll = new QScrollArea;
     cartridgeScroll->setWidget(cartridge_);
@@ -407,6 +428,7 @@ void MainWindow::buildDocks() {
     tilesDock_ = makeDock("Sprites and tiles", "tilesDock", tiles_);
     connect(tiles_, &TileInspector::spriteSelected, this, [this](int index) { game_->setSelectedSprite(index); });
     connect(tiles_, &TileInspector::addressActivated, this, [this](std::uint16_t a) {
+        memoryDock_->show(); memoryDock_->raise();
         selectAddress(a);
         statusBar()->showMessage(QString("Selected %1 in the Memory panel.").arg(q(hex(a))), 4000);
     });
@@ -415,6 +437,7 @@ void MainWindow::buildDocks() {
     mapDock_ = makeDock("Memory map", "mapDock", map_);
     connect(map_, &ActivityPanel::clearRequested, this, [this] { engine_.clearActivityMap(); updatePanels(true); });
     connect(map_->view(), &ActivityMapView::addressActivated, this, [this](std::uint16_t a) {
+        memoryDock_->show(); memoryDock_->raise();
         selectAddress(a);
         statusBar()->showMessage(QString("Selected %1 in the Memory panel.").arg(q(hex(a))), 4000);
     });
@@ -543,6 +566,7 @@ void MainWindow::warmBankDemo() {
 }
 void MainWindow::run() {
     if (running_) return;
+    leaveLesson();
     running_ = true; runStartTick_ = engine_.ticks(); wall_.restart(); published_.restart();
     runAction_->setText("Pause · F5");
     for (auto* a : {stepAction_, frameAction_, untilAction_}) a->setEnabled(false);
@@ -555,29 +579,27 @@ void MainWindow::pause() {
     if (was) refresh();
 }
 void MainWindow::tick() {
-    auto target = runStartTick_ + std::uint64_t(wall_.nsecsElapsed()) * ticksPerSecond / 1000000000;
+    auto target = runStartTick_ + ticksForNanoseconds(std::uint64_t(wall_.nsecsElapsed()));
     // Discard excessive wall-clock debt after a slow machine or suspended window.
     if (target > engine_.ticks() + 2 * frameTicks) {
         runStartTick_ = engine_.ticks(); wall_.restart(); target = engine_.ticks() + frameTicks;
     }
     engine_.advanceTo(target, std::chrono::microseconds(3000));
     if (published_.elapsed() >= 33) { refresh(); published_.restart(); }
-    // Keep a crash or power cut from losing much progress in a game's save.
-    if (batteryTimer_.elapsed() >= 3000) { batteryTimer_.restart(); if (engine_.batteryDirty()) saveBattery(); }
 }
 void MainWindow::instructionStep() {
-    pause();
+    pause(); leaveLesson();
     auto result = engine_.stepInstruction(); refresh();
     statusBar()->showMessage(result.executedInstruction ? "Executed one opcode; every state panel shows the new boundary."
         : "No opcode executed within two frame periods (CPU may be halted/stopped). Time advanced; the cursor shows the exact result.", 6000);
 }
 void MainWindow::frameStep() {
-    pause(); auto result = engine_.stepFrame(); refresh();
+    pause(); leaveLesson(); auto result = engine_.stepFrame(); refresh();
     statusBar()->showMessage(result.completedFrame ? "Advanced to the next completed output, then finished its enclosing instruction."
         : "No completed output within the frame-step limit.", 6000);
 }
 WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
-    pause();
+    pause(); leaveLesson();
     selectedEvent_.reset();
     auto result = engine_.runUntilWrite(address, 60 * frameTicks);
     refresh();
@@ -587,13 +609,13 @@ WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
         statusBar()->showMessage("Turn on Capture writes to stop on a write.", 6000);
     } else if (result.stop == WatchResult::Stop::Dma) {
         const auto& d = *result.dma;
-        statusBar()->showMessage(QString("Stopped after an OAM DMA copy of %1–%2 filled OAM, including %3 (requested by %4; %5 instructions, %6 frames later).")
+        statusBar()->showMessage(QString("Stopped after checking the OAM DMA request for %1–%2, including %3 (requested by %4; %5 instructions, %6 frames later; %7 of 160 bytes matched).")
             .arg(q(hex(d.sourceOf(0))), q(hex(d.sourceOf(oamBytes - 1))), where,
                  d.instruction ? q(hex(d.instruction->pc)) + " " + q(disassemble(*d.instruction)) : QString("an unrecorded instruction"))
-            .arg(result.instructions).arg(result.frames), 10000);
+            .arg(result.instructions).arg(result.frames).arg(d.matching), 10000);
     } else if (result.stop == WatchResult::Stop::Write) {
         const auto& w = *result.write;
-        statusBar()->showMessage(QString("Stopped after the write to %1 by %2 (%3 instructions, %4 frames later).")
+        statusBar()->showMessage(QString("Stopped after the CPU write attempt to %1 by %2 (%3 instructions, %4 frames later).")
             .arg(where, w.instruction ? q(hex(w.instruction->pc)) + " " + q(disassemble(*w.instruction)) : QString("interrupt/wait work"))
             .arg(result.instructions).arg(result.frames), 10000);
     } else {
@@ -603,7 +625,7 @@ WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
     return result;
 }
 WatchResult MainWindow::runUntilBankChange() {
-    pause();
+    pause(); leaveLesson();
     selectedEvent_.reset();
     auto result = engine_.runUntilBankChange(60 * frameTicks);
     refresh();
@@ -633,16 +655,17 @@ void MainWindow::restart() {
     afterLoad();
 }
 void MainWindow::loadTeaching() {
-    pause(); saveBattery();
+    pause(); if (!preserveBattery("opening another game")) return;
     engine_.loadTeaching(); warmTeaching();
     romName_ = "teaching game"; savePath_.clear();
+    batteryProblem_.clear(); batteryBlocked_ = false;
     setWindowTitle("Console Observatory — DMG teaching lab");
     afterLoad(); setMemoryBase(0xC000);
 }
 void MainWindow::loadBankDemo() {
     const auto folder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     const QByteArray bytes(reinterpret_cast<const char*>(bankdemo::rom.data()), qsizetype(bankdemo::rom.size()));
-    loadBytes(bytes, "bank-switching demo", folder.isEmpty() ? QString() : folder + "/bankdemo.sav");
+    if (!loadBytes(bytes, "bank-switching demo", folder.isEmpty() ? QString() : folder + "/bankdemo.sav")) return;
     setMemoryBase(0x4000);
     cartridgeDock_->show(); cartridgeDock_->raise();
 }
@@ -655,8 +678,9 @@ void MainWindow::afterLoad() {
     // Overlays compare across time; a new session starts without them.
     spritesAction_->setChecked(false); changesAction_->setChecked(false);
     game_->setShowSprites(false); game_->setShowChanges(false); game_->setSelectedSprite(-1);
+    tiles_->resetSelection();
     refresh();
-    saveBatteryAction_->setEnabled(snapshot_.cartridge.info.battery && !savePath_.isEmpty());
+    updateBatteryStatus();
     setLessonStep(idleLessonStep());
 }
 void MainWindow::loadFile(const QString& path) {
@@ -671,20 +695,21 @@ void MainWindow::loadFile(const QString& path) {
     const QFileInfo info(path);
     loadBytes(file.readAll(), info.fileName(), info.absolutePath() + "/" + info.completeBaseName() + ".sav");
 }
-void MainWindow::loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath) {
+bool MainWindow::loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath) {
     pause();
     const std::span rom(reinterpret_cast<const std::uint8_t*>(bytes.constData()), std::size_t(bytes.size()));
     const auto cart = describeCartridge(rom);
     if (!cart.supported) {
         QMessageBox::warning(this, "Unsupported cartridge", QString("%1 uses a %2 cartridge (type %3), which the SameBoy core does not emulate.")
             .arg(name, q(cart.typeName), q(hex(cart.type, 2))));
-        return;
+        return false;
     }
-    saveBattery(); // keep the previous game's save before replacing it
+    if (!preserveBattery("opening another game")) return false;
     try {
         engine_.loadRom(rom);
-    } catch (const std::exception& error) { QMessageBox::warning(this, "Cannot load ROM", error.what()); return; }
+    } catch (const std::exception& error) { QMessageBox::warning(this, "Cannot load ROM", error.what()); return false; }
     romName_ = name; savePath_ = cart.battery ? savePath : QString();
+    batteryProblem_.clear(); batteryBlocked_ = false;
     const bool loadedSave = loadBatteryFile();
     const auto first = engine_.snapshot();
     if (first.teaching) warmTeaching();
@@ -693,32 +718,105 @@ void MainWindow::loadBytes(const QByteArray& bytes, const QString& name, const Q
     afterLoad();
     setMemoryBase(0xC000);
     QString message = "Loaded " + name + ": " + q(cart.typeName) + QString(", %1 ROM banks").arg(cart.romBanks());
-    if (!savePath_.isEmpty()) message += (loadedSave ? ", save loaded from " : ", battery RAM saves to ") + QFileInfo(savePath_).fileName();
+    if (!savePath_.isEmpty()) message += (loadedSave ? ", save loaded from " : batteryBlocked_ ? ", existing save protected: " : ", battery RAM saves to ") + QFileInfo(savePath_).fileName();
     if (cart.cgbOnly()) message += ". Marked Game Boy Color only: it may refuse to run on this monochrome system";
     else if (!first.teaching && !first.bankDemo) message += ". Paused at power-on; press F5 to run";
     statusBar()->showMessage(message + ".", 10000);
+    return true;
 }
 bool MainWindow::loadBatteryFile() {
     if (savePath_.isEmpty()) return false;
     QFile file(savePath_);
-    // A .sav holds cartridge RAM plus an optional clock footer; ignore absurd files.
-    if (!file.exists() || file.size() > 1024 * 1024 || !file.open(QIODevice::ReadOnly)) return false;
-    const auto data = file.readAll();
-    engine_.loadBattery(std::span(reinterpret_cast<const std::uint8_t*>(data.constData()), std::size_t(data.size())));
-    return true;
+    if (!file.exists()) return false;
+    // A failed read must never turn into an automatic overwrite of that save.
+    const auto maximum = qint64(engine_.batteryData().size());
+    if (file.size() <= maximum && file.open(QIODevice::ReadOnly)) {
+        const auto data = file.readAll();
+        if (file.error() == QFileDevice::NoError && engine_.loadBattery(
+                std::span(reinterpret_cast<const std::uint8_t*>(data.constData()), std::size_t(data.size())))) return true;
+    }
+    batteryBlocked_ = true;
+    batteryProblem_ = "Existing save could not be loaded (unreadable or incompatible size). It has been protected from overwrite.";
+    return false;
 }
 bool MainWindow::saveBattery() {
-    if (savePath_.isEmpty()) return false;
+    if (savePath_.isEmpty() || batteryBlocked_) { updateBatteryStatus(); return false; }
     const auto data = engine_.batteryData();
     if (data.empty()) return false;
     QDir().mkpath(QFileInfo(savePath_).absolutePath());
     QSaveFile file(savePath_);
     if (!file.open(QIODevice::WriteOnly) || file.write(reinterpret_cast<const char*>(data.data()), qint64(data.size())) != qint64(data.size()) || !file.commit()) {
-        statusBar()->showMessage("Could not save battery RAM to " + QDir::toNativeSeparators(savePath_) + ": " + file.errorString(), 10000);
+        batteryProblem_ = "Could not save to " + QDir::toNativeSeparators(savePath_) + ": " + file.errorString();
+        updateBatteryStatus();
+        statusBar()->showMessage(batteryProblem_ + ". Progress is still in memory; retry or use File → Save battery RAM as.");
         return false;
     }
     engine_.clearBatteryDirty();
+    batteryProblem_.clear(); updateBatteryStatus();
     return true;
+}
+bool MainWindow::saveBatteryAs(const QString& path) {
+    if (path.isEmpty()) return false;
+    const auto previousPath = savePath_;
+    const bool blocked = batteryBlocked_;
+    savePath_ = QFileInfo(path).absoluteFilePath(); batteryBlocked_ = false;
+    if (saveBattery()) return true;
+    savePath_ = previousPath; batteryBlocked_ = blocked; updateBatteryStatus();
+    return false;
+}
+bool MainWindow::preserveBattery(const QString& action) {
+    if (!engine_.batteryDirty() || engine_.batteryData().empty()) return true;
+    if (saveBattery()) return true;
+    cartridgeDock_->show(); cartridgeDock_->raise();
+    // Never trap the user: they may keep the game open, save elsewhere, or
+    // knowingly discard the progress that cannot be written.
+    QMessageBox box(QMessageBox::Warning, "Unsaved game progress",
+        QString("This game's save could not be written%1, so its newest progress is only in memory.\n\n"
+                "Save it to another file before %2, or discard that progress?")
+            .arg(savePath_.isEmpty() ? QString() : " to " + QDir::toNativeSeparators(savePath_), action),
+        QMessageBox::NoButton, this);
+    box.setObjectName("unsavedProgressPrompt");
+    if (!batteryProblem_.isEmpty()) box.setInformativeText(batteryProblem_);
+    auto* elsewhere = box.addButton("Save elsewhere…", QMessageBox::AcceptRole);
+    elsewhere->setObjectName("saveElsewhereButton");
+    auto* discard = box.addButton("Discard progress", QMessageBox::DestructiveRole);
+    discard->setObjectName("discardProgressButton");
+    auto* cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.setEscapeButton(cancel);
+    box.exec();
+    if (box.clickedButton() == discard) {
+        engine_.clearBatteryDirty();
+        updateBatteryStatus();
+        statusBar()->showMessage("Discarded the unsaved battery progress.", 6000);
+        return true;
+    }
+    if (box.clickedButton() == elsewhere) {
+        const auto path = QFileDialog::getSaveFileName(this, "Save battery RAM elsewhere", savePath_, "Battery saves (*.sav);;All files (*)");
+        if (!path.isEmpty() && saveBatteryAs(path)) return true;
+    }
+    statusBar()->showMessage("The current game is still open with its unsaved progress. Retry saving or use File → Save battery RAM as.");
+    return false;
+}
+void MainWindow::updateBatteryStatus() {
+    if (!batteryStatus_) return;
+    const bool hasBattery = snapshot_.cartridge.info.battery && (snapshot_.cartridge.ramBytes || snapshot_.cartridge.info.timer);
+    saveBatteryAction_->setEnabled(hasBattery && !savePath_.isEmpty() && !batteryBlocked_);
+    saveBatteryAsAction_->setEnabled(hasBattery);
+    batteryStatus_->setVisible(hasBattery);
+    if (!hasBattery) return;
+    QString text = QString("<b>Battery save: %1</b><br>%2")
+        .arg(batteryBlocked_ ? "protected" : engine_.batteryDirty() ? "unsaved changes" : "saved / no pending changes",
+             QDir::toNativeSeparators(savePath_).toHtmlEscaped());
+    if (!batteryProblem_.isEmpty()) text += "<br>" + batteryProblem_.toHtmlEscaped();
+    // Links in the accent colour: Qt's default link blue is unreadable on the dark theme.
+    const auto link = [](const char* href, const char* label) {
+        return QString("<a href='%1' style='color:%2'>%3</a>").arg(href, style::accent.name(), label);
+    };
+    if (!batteryBlocked_) text += "<br>" + link("save:retry", "Save now / retry") + " · ";
+    else text += "<br>Automatic saving is disabled for this file. ";
+    text += link("save:elsewhere", "Save elsewhere");
+    batteryStatus_->setText(text);
 }
 QString MainWindow::romLabel(std::uint16_t address) const {
     const auto name = addressName(address, programOf(snapshot_));
@@ -794,16 +892,17 @@ void MainWindow::setLessonStep(LessonStep step, const LessonEvidence& evidence, 
     lessonHeading_->setText(q(page.heading));
     lessonBody_->setText(q(page.body) + (problem.isEmpty() ? QString() : "<p style='color:#f2a65a'>" + problem + "</p>"));
     lessonAction_->setText(q(page.action));
-    lessonStop_->setVisible(step != LessonStep::Start && step != LessonStep::NeedsTeachingRom && step != LessonStep::Done &&
+    lessonStop_->setVisible(step != LessonStep::Start && step != LessonStep::NeedsTeachingRom && step != LessonStep::Done && step != LessonStep::FreeExploration &&
                             step != LessonStep::BankDemo);
     lessonFollow_->setVisible(snapshot_.teaching);
     lessonStop_->setToolTip(step == LessonStep::BankSwitched ? tips::make("Stop", "Go back to the bank demo's introduction.")
                                                              : tips::key("lesson.stop"));
     using B = SystemDiagram::Block; using P = SystemDiagram::Path;
-    if (step == LessonStep::BankDemo || step == LessonStep::BankSwitched || step == LessonStep::NeedsTeachingRom) {
+    if (step == LessonStep::BankDemo || step == LessonStep::BankSwitched || step == LessonStep::NeedsTeachingRom || step == LessonStep::FreeExploration) {
         lessonProgress_->setText(QString("<span style='color:%1'>%2</span>").arg(style::muted.name(),
-            step == LessonStep::NeedsTeachingRom ? "Your ROM · " + romName_.toHtmlEscaped() : QString("Bundled bank-switching demo")));
-        if (step == LessonStep::NeedsTeachingRom) diagram_->setHighlight({}, {});
+            step == LessonStep::NeedsTeachingRom ? "Your ROM · " + romName_.toHtmlEscaped() :
+            step == LessonStep::FreeExploration ? QString("Free exploration · teaching game") : QString("Bundled bank-switching demo")));
+        if (step == LessonStep::NeedsTeachingRom || step == LessonStep::FreeExploration) diagram_->setHighlight({}, {});
         else diagram_->setHighlight({P::RomCpu}, {B::Cartridge, B::Cpu});
         return;
     }
@@ -823,6 +922,13 @@ void MainWindow::setLessonStep(LessonStep step, const LessonEvidence& evidence, 
     case LessonStep::Tile: diagram_->setHighlight({P::VramPpu}, {B::Vram}); break;
     default: diagram_->setHighlight({}, {}); break;
     }
+}
+void MainWindow::leaveLesson() {
+    if ((!snapshot_.teaching && !snapshot_.bankDemo) || lessonStep_ == LessonStep::FreeExploration || lessonStep_ == LessonStep::BankDemo) return;
+    engine_.releaseButtons();
+    spritesAction_->setChecked(false); changesAction_->setChecked(false);
+    game_->setShowSprites(false); game_->setShowChanges(false); game_->setSelectedSprite(-1);
+    setLessonStep(snapshot_.teaching ? LessonStep::FreeExploration : LessonStep::BankDemo);
 }
 void MainWindow::stopLesson() {
     engine_.setButton(Button::Right, false);
@@ -872,8 +978,13 @@ void MainWindow::advanceLesson() {
     }
     case LessonStep::Start:
     case LessonStep::Done:
+    case LessonStep::FreeExploration:
         if (!snapshot_.teaching) { setLessonStep(idleLessonStep()); return; }
-        if (snapshot_.playerX >= 152) { restart(); statusBar()->showMessage("The star was at the right edge, so the lesson restarted the game first.", 6000); }
+        // Manual exploration may have stopped anywhere in the game loop.
+        // Begin from the same completed frame every time so each claim holds.
+        engine_.restart(); warmTeaching(); afterLoad();
+        lessonStartX_ = snapshot_.playerX; lessonStartFrame_ = snapshot_.frames;
+        engine_.releaseButtons();
         engine_.setButton(Button::Right, true);
         refresh();
         setLessonStep(LessonStep::Holding);
@@ -883,9 +994,8 @@ void MainWindow::advanceLesson() {
         engine_.setButton(Button::Right, true);
         const auto r = engine_.runUntilWrite(demo::player_x, 4 * frameTicks);
         refresh();
-        if (r.stop != WatchResult::Stop::Write) {
-            setLessonStep(LessonStep::Holding, {}, "No write to player_x happened within four frames. If the star is at the right edge "
-                                                   "(player_x = 152) the game skips the store; use Restart, then try again.");
+        if (r.stop != WatchResult::Stop::Write || snapshot_.playerX != lessonStartX_ + 1 || snapshot_.frames != lessonStartFrame_) {
+            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected one-pixel store was not observed before a new frame. Start again to repeat from a known boundary.");
             return;
         }
         memoryDock_->show(); memoryDock_->raise();
@@ -897,7 +1007,9 @@ void MainWindow::advanceLesson() {
         needCapture();
         const auto r = engine_.runUntilWrite(0xFE01, 2 * frameTicks);
         refresh();
-        if (r.stop != WatchResult::Stop::Write) { setLessonStep(LessonStep::Stored, {}, "No write to OAM X happened within two frames."); return; }
+        if (r.stop != WatchResult::Stop::Write || snapshot_.video.oam[1] != snapshot_.playerX + 8 || snapshot_.frames != lessonStartFrame_) {
+            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected OAM store was not observed at the lesson boundary. Start again to establish a fresh frame."); return;
+        }
         spritesAction_->setChecked(true); game_->setShowSprites(true); game_->setSelectedSprite(0);
         selectAddress(0xFE01);
         setLessonStep(LessonStep::Copied, evidence(r));
@@ -909,6 +1021,9 @@ void MainWindow::advanceLesson() {
         changesAction_->setChecked(true); game_->setShowChanges(true);
         LessonEvidence e;
         e.frames = r.completedFrame ? 1u : 0u; e.changedPixels = game_->changedPixels();
+        if (!r.completedFrame || snapshot_.frames != lessonStartFrame_ + 1 || snapshot_.frameKind != "VBlank frame" || e.changedPixels <= 0) {
+            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected changed frame was not observed. Start again to repeat the lesson from a fresh frame."); return;
+        }
         setLessonStep(LessonStep::Drawn, e);
         return;
     }
@@ -928,10 +1043,12 @@ void MainWindow::advanceLesson() {
 void MainWindow::refresh() {
     if (snapshot_.ticks) previous_ = snapshot_;
     snapshot_ = engine_.snapshot(memoryBase_);
+    if (previous_ && previous_->ticks == snapshot_.ticks && previous_->traceEnabled == snapshot_.traceEnabled &&
+        snapshot_.activity.startTicks == snapshot_.activity.endTicks) snapshot_.activity = previous_->activity;
     const auto& s = snapshot_;
     badge_->setText(running_ ? "RUNNING" : "PAUSED");
     badge_->setStyleSheet(running_ ? "background:#2c6b5c; color:#e9fff6;" : "background:#57472c; color:#ffe19a;");
-    cursor_->setText(QString("t = %1 ticks\ninstruction #%2 · output #%3").arg(s.ticks).arg(s.instructions).arg(s.frames));
+    cursor_->setText(QString("State now: t = %1 ticks\ninstruction #%2 · output #%3").arg(s.ticks).arg(s.instructions).arg(s.frames));
     const std::array<std::uint16_t, 6> values{s.registers.af, s.registers.bc, s.registers.de, s.registers.hl, s.registers.sp, s.registers.pc};
     std::array<std::uint16_t, 6> old{};
     if (previous_) old = {previous_->registers.af, previous_->registers.bc, previous_->registers.de, previous_->registers.hl, previous_->registers.sp, previous_->registers.pc};
@@ -954,8 +1071,14 @@ void MainWindow::refresh() {
     if (!note.empty()) text += q(note);
     instruction_->setText(text.trimmed());
     game_->setFrame(s);
-    frameLabel_->setText(QString("Picture: output #%1 · %2 · completed at t=%3")
-        .arg(s.frames).arg(q(s.frameKind)).arg(s.frameBoundaryTicks));
+    // One line, so the game keeps 2x scale at the minimum window size; the
+    // exact completion tick lives in the tooltip.
+    const auto age = s.ticks - s.frameBoundaryTicks;
+    frameLabel_->setText(QString("Picture: output #%1 · %2 · drawn %3 ms before now")
+        .arg(s.frames).arg(q(s.frameKind)).arg(double(age) * 1000 / ticksPerSecond, 0, 'f', 2));
+    frameLabel_->setToolTip(tips::make(q(glossary("ui.frame").title), q(glossary("ui.frame").body),
+        QString("Output #%1 completed at t = %2 ticks; the CPU and memory panels show t = %3, %4 CPU cycles later.")
+            .arg(s.frames).arg(s.frameBoundaryTicks).arg(s.ticks).arg(age / 2)));
     for (int row = 0; row < 16; ++row) {
         cell(memory_, row, 0, q(hex(memoryBase_ + row * 8)));
         for (int c = 0; c < 8; ++c) {
@@ -972,6 +1095,7 @@ void MainWindow::refresh() {
         .arg(a.dmaTransfers ? QString(" · OAM DMA %1").arg(a.dmaTransfers) : QString())
         .arg(s.traceEnabled ? "" : " (capture off)"));
     diagram_->setSnapshot(s);
+    updateBatteryStatus();
     updatePanels(!running_);
     updateSelection(); updateWriter();
 }
@@ -983,14 +1107,17 @@ void MainWindow::updatePanels(bool force) {
         for (int row = 0; row < rows; ++row) {
             const auto& e = s.writes[s.writes.size() - 1 - row];
             cell(writes_, row, 0, QString::number(e.endTicks)); writes_->item(row, 0)->setData(Qt::UserRole, qulonglong(e.id));
-            cell(writes_, row, 1, e.instruction ? q(hex(e.instruction->pc)) + "  " + q(disassemble(*e.instruction)) : "no opcode (interrupt/wait)");
+            cell(writes_, row, 1, e.instruction ? q(hex(e.instruction->pc)) +
+                 (e.instruction->pc < 0x8000 && s.cartridge.info.banked() ? QString(" bank %1").arg(e.instruction->bank) : QString()) +
+                 "  " + q(disassemble(*e.instruction)) : "no opcode (interrupt/wait)");
             if (e.address < 0x8000) {
                 // ROM cannot be written: on a banked cartridge this is an MBC command.
                 const auto reg = mbcRegisterName(s.cartridge.info.mbc, e.address);
                 cell(writes_, row, 2, q(hex(e.address)) + " ← " + q(hex(e.requested, 2)) + (reg.empty() ? QString() : " " + q(reg)));
                 cell(writes_, row, 3, bankEffect(e, s.cartridge.info), e.banksBefore != e.banksAfter);
             } else {
-                cell(writes_, row, 2, q(hex(e.address)) + " " + q(addressName(e.address, programOf(s))));
+                cell(writes_, row, 2, q(hex(e.address)) + " " + q(addressName(e.address, programOf(s))) +
+                     (e.address >= 0xA000 && e.address < 0xC000 ? QString(" (recorded RAM bank %1)").arg(e.bank) : QString()));
                 cell(writes_, row, 3, (e.valuesAvailable ? q(hex(e.before, 2)) : "—") + " → " + (e.valuesAvailable ? q(hex(e.after, 2)) : "—") +
                      (e.address == 0xFF46 ? QString(" · starts OAM DMA from %1").arg(q(hex(std::uint16_t(e.requested << 8)))) : QString()),
                      e.address == 0xFF46);
@@ -1019,11 +1146,11 @@ void MainWindow::updateWriter() {
         for (const auto& e : snapshot_.writes) if (e.id == *selectedEvent_) found = &e;
     } else {
         for (auto i = snapshot_.writes.rbegin(); i != snapshot_.writes.rend(); ++i) {
-            if (i->canonicalAddress == canonicalAddress(selectedAddress_)) { found = &*i; break; }
+            if (writerMatches(*i, selectedAddress_, snapshot_.cartridge)) { found = &*i; break; }
         }
     }
-    // OAM is also written by DMA, which the CPU write hook cannot see. The newer
-    // of the last CPU store and the last observed copy is the last writer.
+    // Retained CPU attempts and DMA requests provide candidate evidence. A
+    // later OAM/source comparison does not establish per-byte provenance.
     const auto a = canonicalAddress(selectedAddress_);
     if (!selectedEvent_ && a >= 0xFE00 && a < 0xFE00 + oamBytes) {
         const auto i = std::size_t(a - 0xFE00);
@@ -1039,17 +1166,18 @@ void MainWindow::updateWriter() {
         const DmaTransfer* dma = snapshot_.dma.empty() ? nullptr : &snapshot_.dma.back();
         if (dma && (!found || found->endTicks <= dma->requestEndTicks)) {
             const auto& d = *dma;
-            QString text = QString("<b>Last writer: OAM DMA</b>, a hardware copy rather than a CPU store. %1 wrote %2 to $FF46 "
+            QString text = QString("<b>Most recent OAM DMA evidence</b>. %1 wrote %2 to $FF46 "
                                    "in [%3, %4] ticks, asking for %5–%6 to be copied into $FE00–$FE9F. ")
                 .arg(html(requestedBy(d)), q(hex(d.page, 2))).arg(d.requestStartTicks).arg(d.requestEndTicks)
                 .arg(q(hex(d.sourceOf(0))), q(hex(d.sourceOf(oamBytes - 1))));
             if (d.status == DmaTransfer::Status::Restarted) {
-                text += QString("A newer request restarted it at t=%1, so only part of it was copied.").arg(d.checkedTicks);
+                text += QString("A newer request restarted it at t=%1; this record does not establish how many bytes transferred.").arg(d.checkedTicks);
             } else {
                 text += QString("Checked at t=%1: %2 of 160 OAM bytes equal their source%3.").arg(d.checkedTicks).arg(d.matching)
-                    .arg(d.matching == int(oamBytes) ? QString() : QString(" (the source or OAM changed during or after the copy)"));
+                    .arg(d.matching == int(oamBytes) ? QString() : QString(" (the comparison does not establish the cause of a mismatch)"));
             }
-            text += QString("<br>This byte came from %1: before %2 · after %3. Click %1 to see which instruction put the value there.")
+            text += QString("<br>This copy requested source %1 for this byte. OAM held %2 at the request and %3 at the check. "
+                            "Click %1 to inspect the source's current retained write evidence; this is not a per-byte transfer trace.")
                 .arg(addressLink(d.sourceOf(i)), q(hex(d.before[i], 2)), q(hex(d.after[i], 2)));
             writer_->setText(text);
             return;
@@ -1063,8 +1191,14 @@ void MainWindow::updateWriter() {
         return;
     }
     const auto& e = *found;
-    auto text = QString("Last writer (interval [%1, %2] ticks): ").arg(e.startTicks).arg(e.endTicks);
+    auto text = QString(selectedEvent_ ? "Selected captured attempt (interval [%1, %2] ticks): " :
+                                        "Last retained CPU attempt (interval [%1, %2] ticks): ").arg(e.startTicks).arg(e.endTicks);
     text += e.instruction ? q(hex(e.instruction->pc)) + "  " + q(disassemble(*e.instruction)) : "core work without an opcode (e.g. interrupt service)";
+    if (e.instruction && e.instruction->pc < 0x8000 && snapshot_.cartridge.info.banked())
+        text += QString(" (executing ROM bank %1)").arg(e.instruction->bank);
+    if (e.address >= 0xA000 && e.address < 0xC000) {
+        text += QString("\nRecorded RAM bank %1; selected address is in RAM bank %2.").arg(e.bank).arg(snapshot_.cartridge.banks.ram);
+    }
     if (e.address < 0x8000) {
         const auto& info = snapshot_.cartridge.info;
         const auto reg = mbcRegisterName(info.mbc, e.address);
@@ -1110,7 +1244,7 @@ void MainWindow::showEvent(QShowEvent* event) {
 }
 void MainWindow::closeEvent(QCloseEvent* event) {
     pause();
-    if (engine_.batteryDirty()) saveBattery();
+    if (!preserveBattery("closing")) { event->ignore(); return; }
     QMainWindow::closeEvent(event);
 }
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
@@ -1128,7 +1262,7 @@ bool MainWindow::ownsKeyboard(QWidget* widget) const {
     return dock && dock->parentWidget() == this;
 }
 bool MainWindow::eventFilter(QObject* object, QEvent* event) {
-    if (event->type() == QEvent::WindowDeactivate && object == this) engine_.releaseButtons();
+    if (event->type() == QEvent::WindowDeactivate && object == this) { leaveLesson(); engine_.releaseButtons(); }
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
         auto* widget = qobject_cast<QWidget*>(object);
         if (!ownsKeyboard(widget)) return QMainWindow::eventFilter(object, event);
@@ -1139,6 +1273,7 @@ bool MainWindow::eventFilter(QObject* object, QEvent* event) {
         const bool textField = qobject_cast<QLineEdit*>(widget);
         const bool enterOnButton = key->key() == Qt::Key_Return && qobject_cast<QAbstractButton*>(widget);
         if (button && !key->isAutoRepeat() && (event->type() == QEvent::KeyRelease || (!textField && !enterOnButton))) {
+            if (event->type() == QEvent::KeyPress) leaveLesson();
             engine_.setButton(*button, event->type() == QEvent::KeyPress);
             return !enterOnButton;
         }

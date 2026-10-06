@@ -294,6 +294,8 @@ void CartridgePanel::setSnapshot(const Snapshot& s, const ActivityMap& activity)
         .arg(info.headerChecksumValid ? "OK" : "does not match"));
     QStringList notes;
     if (!info.note.empty()) notes << q(info.note);
+    if (info.type != info.effectiveType) notes << QString("Declared header type %1; effective controller type %2 (%3).")
+        .arg(q(hex(info.type, 2)), q(hex(info.effectiveType, 2)), q(info.typeName));
     if (info.cgbOnly()) notes << "Marked Game Boy Color only. This lab emulates the original Game Boy, so the game sees a monochrome system; most such games show their own \"requires Game Boy Color\" screen.";
     else if (info.cgbEnhanced()) notes << "Also supports Game Boy Color; running in monochrome Game Boy mode.";
     if (info.sgbFlag == 0x03) notes << "Has Super Game Boy features, which are not emulated here.";

@@ -19,6 +19,14 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Verify native X11 interactions
         run: xvfb-run -a ./build/widget_tests
+      - name: Verify engine and battery-buffer regressions with AddressSanitizer
+        run: |
+          cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DOBSERVATORY_BUILD_GUI=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+          cmake --build build-asan --parallel 2
+          ctest --test-dir build-asan --output-on-failure
       - name: Verify install and package generation
         run: |
           cmake --install build --prefix "$PWD/out/install"

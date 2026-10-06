@@ -2,7 +2,7 @@
 
 Native desktop teaching lab for Linux x86-64 and Windows x64. C++20 / Qt 6
 Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
-`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.4.0.
+`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.5.0.
 
 ## Works
 
@@ -26,10 +26,16 @@ Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
   bank code) with a two-page lesson that stops at the real switch.
 - **Battery saves**: `.sav` next to the ROM in SameBoy's format, loaded on
   open, written atomically every ~3 s while dirty, on game change, and on exit.
+  Saving also runs while paused. If saving fails, closing or changing the game
+  asks: save elsewhere, discard, or cancel (never a dead end); persistent
+  Cartridge status offers retry and saving elsewhere. Rejected
+  existing saves are protected from automatic overwrite. Engine validation
+  accepts complete RAM and recognized clock footers without touching the
+  machine on rejection; restart retains unsaved battery state.
 - **OAM DMA observed**: each `$FF46` request is recorded with its instruction
   and OAM as it was, then OAM is checked against the source once the copy must
-  have finished. OAM bytes name the DMA as their last writer with a link to
-  the source byte (whose own CPU writer is one click away); F9 on OAM stops
+  have finished. OAM bytes show requested DMA sources and later observed values
+  with qualified evidence, linking to the source's current retained CPU attempts; F9 on OAM stops
   after the copy; the Sprites panel and system overview show it.
 - **Explanatory tooltips** on every control and view, from a Qt-free glossary
   written for newcomers: registers, flags, each memory byte (region, and what
@@ -48,12 +54,25 @@ Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
 - Shared instruction-boundary snapshots (CPU, memory, VRAM, OAM, video
   registers), storage disassembly, change highlighting, source-gated names,
   bounded last-writer evidence, linked selection across panels.
+  RAM writer lookup uses bank and mirrored storage identity. Sprite selection
+  follows animation; manual tiles stay pinned. Links reveal Memory, paused
+  browsing retains activity, and picture age is shown beside current state.
+  External execution/input/capture changes leave guided lessons; restarting a
+  lesson establishes a known frame and checks each expected observation.
+  Long-run pacing splits nanoseconds before multiplication to avoid overflow.
 - Reproducible ROM/symbols/embedding without RGBDS; Linux `.deb` and Windows
   portable ZIP (windeployqt) packaging; Linux and Windows CI; a Release
   workflow that builds, verifies, and publishes both packages per version.
   Published releases: v0.2.0, v0.3.0, and v0.4.0 (latest).
 
 ## Verified
+
+Review fixes at application commit `9d87e47`: Linux CI run 23 passes CTest,
+native X11 interactions, and packaging; Windows CI run 19 passes CTest,
+native Windows widgets, packaging, and the clean packaged launch. Default,
+minimum-size, and lesson screenshots inspected. See `docs/VERIFICATION.md`
+for links and the separate sanitizer check.
+
 
 Linux (Ubuntu 24.04, Qt 6.4.2): five CTest suites pass, including twelve
 engine groups (post-boot state, trace parity with VRAM/OAM/previous output,

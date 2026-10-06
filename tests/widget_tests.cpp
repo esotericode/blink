@@ -9,11 +9,13 @@
 #include "fixtures.hpp"
 #include <QAction>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -304,7 +306,7 @@ int main(int argc, char** argv) {
         require(hover(runButton,runButton->rect().center()).contains("Run / pause"),"Toolbar tooltip missing");
         auto* bankMap=window.findChild<BankMap*>("bankMap");
         window.findChild<QDockWidget*>("cartridgeDock")->raise(); QTest::qWait(20);
-        require(hover(bankMap,QPoint(30,40)).contains("fixed ROM window"),"Bank map window tooltip missing");
+        require(hover(bankMap,QPoint(30,40)).contains("lower ROM window"),"Bank map window tooltip missing");
         tilesDock->raise(); QTest::qWait(20);
         auto* detail=window.findChild<TileDetail*>("tileDetail");
         require(detail,"Tile detail missing");
@@ -314,6 +316,105 @@ int main(int argc, char** argv) {
         screenShot("tooltip-tile-pixel.png");
         tips::hide();
         require(!tips::current(),"Tooltip did not hide");
+
+        // Each external execution control leaves old lesson explanations behind.
+        for (int stage = 1; stage <= 5; ++stage) {
+            window.loadTeaching();
+            for (int step = 0; step < stage; ++step) window.advanceLesson();
+            window.instructionStep();
+            require(window.lessonStep() == LessonStep::FreeExploration && window.displayedSnapshot().heldButtons == 0 &&
+                    body->text().contains("earlier lesson stop") && diagram->highlightedPaths().empty(), "Manual step left stale lesson evidence");
+            window.advanceLesson(); window.advanceLesson();
+            require(window.lessonStep() == LessonStep::Stored && window.displayedSnapshot().playerX == 73 &&
+                    body->text().contains("copy A = 73"), "Restarted lesson did not establish fresh evidence");
+        }
+        window.frameStep(); require(window.lessonStep() == LessonStep::FreeExploration, "Manual frame retained lesson");
+        window.advanceLesson(); window.advanceLesson(); window.runUntilWritten(demo::frame_counter);
+        require(window.lessonStep() == LessonStep::FreeExploration, "Watch action retained lesson");
+        window.advanceLesson(); window.advanceLesson(); window.run(); window.pause();
+        require(window.lessonStep() == LessonStep::FreeExploration, "Run retained lesson");
+        window.advanceLesson(); window.advanceLesson();
+        window.findChild<QAction*>("traceAction")->trigger();
+        require(window.lessonStep() == LessonStep::FreeExploration, "Capture change retained lesson");
+        window.findChild<QAction*>("traceAction")->trigger();
+
+        // Sprite animation follows OAM; manually choosing a tile pins it.
+        auto animated = window.displayedSnapshot();
+        tiles->setSnapshot(animated); tiles->selectSprite(0);
+        animated.video.oam[2] = 3; tiles->setSnapshot(animated);
+        require(tiles->selectedTile() == 3, "Sprite animation left an old tile selected");
+        animated.video.lcdc |= 4; animated.video.oam[2] = 5; tiles->setSnapshot(animated);
+        require(tiles->selectedTile() == 4, "8x16 sprite did not select its even first tile");
+        tiles->selectTile(7); animated.video.oam[2] = 9; tiles->setSnapshot(animated);
+        require(tiles->selectedTile() == 7 && tiles->selectedSprite() == -1, "Manual tile did not stay pinned");
+        window.loadTeaching(); require(tiles->selectedSprite() == -1 && tiles->selectedTile() == 2, "New game retained tile selection");
+        const auto intervalBefore = window.displayedSnapshot().activity;
+        window.setMemoryBase(0xFE00);
+        require(window.displayedSnapshot().activity.instructions == intervalBefore.instructions &&
+                window.displayedSnapshot().activity.startTicks == intervalBefore.startTicks, "Paused browsing erased the activity interval");
+        tilesDock->raise(); emit tiles->addressActivated(0x8020); QTest::qWait(20);
+        auto* memoryDock = window.findChild<QDockWidget*>("memoryDock");
+        require(!memoryDock->visibleRegion().isEmpty() && window.selectedAddress() == 0x8020, "Tile link did not reveal Memory");
+        mapDock->raise(); emit window.findChild<ActivityMapView*>("activityMap")->addressActivated(0xC001); QTest::qWait(20);
+        require(!memoryDock->visibleRegion().isEmpty() && window.selectedAddress() == 0xC001, "Map link did not reveal Memory");
+
+        // The rendered writer must use bank identity, including historical selection.
+        const auto ramRom = bankedRamFixture(); const auto ramPath = dir.filePath("banked RAM.gb");
+        { QFile f(ramPath); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(ramRom.data()), qint64(ramRom.size())) == qint64(ramRom.size()), "RAM fixture write failed"); }
+        window.loadFile(ramPath); window.runUntilWritten(0xA000); window.runUntilWritten(0xA000);
+        window.instructionStep(); window.instructionStep(); window.selectAddress(0xA000);
+        require(window.displayedSnapshot().cartridge.banks.ram == 0 && writer->text().contains("Recorded RAM bank 0") &&
+                writer->text().contains("after $11"), "Rendered writer came from another RAM bank");
+
+        // Make the destination a directory after loading: saving fails reliably
+        // without relying on OS permissions or privileged test-runner behavior.
+        const auto failedPath = window.batteryPath();
+        require(QDir().mkdir(failedPath), "Could not create failing save destination");
+        const auto unsaved = window.engine().stateBytes();
+        require(!window.saveBattery() && window.engine().batteryDirty(), "Save failure cleared dirty progress");
+        // When saving fails, the user is asked; answer the modal prompt from its event loop.
+        auto answer = [](const char* buttonName) {
+            QTimer::singleShot(0, [buttonName] {
+                auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                require(box && box->objectName() == "unsavedProgressPrompt", "Unsaved-progress prompt not shown");
+                auto* button = buttonName ? box->findChild<QAbstractButton*>(buttonName) : box->button(QMessageBox::Cancel);
+                require(button, "Unsaved-progress prompt button missing");
+                button->click();
+            });
+        };
+        answer(nullptr); window.loadTeaching();
+        require(window.engine().stateBytes() == unsaved && !window.displayedSnapshot().teaching, "Cancelling the prompt allowed a game change");
+        answer(nullptr); QCloseEvent close; QApplication::sendEvent(&window, &close);
+        require(!close.isAccepted() && window.engine().stateBytes() == unsaved, "Cancelling the prompt allowed closing");
+        auto* saveStatus = window.findChild<QLabel*>("batteryStatus");
+        require(saveStatus && saveStatus->text().contains("Could not save"), "Save error was not persistent");
+        const auto recovered = dir.filePath("recovered.sav");
+        require(window.saveBatteryAs(recovered) && !window.engine().batteryDirty() && window.batteryPath() == recovered, "Saving elsewhere did not recover progress");
+        { QFile f(recovered); require(f.open(QIODevice::ReadOnly) && f.readAll().size() == 32768, "Recovered save has wrong size"); }
+        window.loadTeaching();
+        // The user is never trapped: discarding unsaved progress lets them move on.
+        window.loadFile(ramPath); // its .sav path is now a directory, so the save is protected
+        window.runUntilWritten(0xA000);
+        require(window.engine().batteryDirty() && !window.saveBattery(), "Discard fixture is not dirty and unsaveable");
+        answer("discardProgressButton"); window.loadTeaching();
+        require(window.displayedSnapshot().teaching && !window.engine().batteryDirty() && QFileInfo(failedPath).isDir(),
+                "Discarding progress did not let the user open another game");
+
+        // Rejected saves survive paused autosave and manual Save unchanged.
+        const auto corruptRom = dir.filePath("corrupt.gb");
+        { QFile f(corruptRom); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(mbc5.data()), qint64(mbc5.size())) == qint64(mbc5.size()), "Corrupt-save ROM fixture failed"); }
+        const QByteArray malformed(8193, '\x42'); const auto corruptSave = dir.filePath("corrupt.sav");
+        { QFile f(corruptSave); require(f.open(QIODevice::WriteOnly) && f.write(malformed) == malformed.size(), "Malformed save fixture failed"); }
+        window.loadFile(corruptRom); window.runUntilWritten(bankdemo::saved_count);
+        auto* autosave = window.findChild<QTimer*>("batteryAutosaveTimer"); require(autosave, "Autosave timer missing");
+        autosave->setInterval(20); QTest::qWait(60);
+        require(!window.running() && !window.saveBattery() && saveStatus->text().contains("protected"), "Rejected save was not protected");
+        { QFile f(corruptSave); require(f.open(QIODevice::ReadOnly) && f.readAll() == malformed, "Rejected save was overwritten"); }
+        const auto cleanSave = dir.filePath("new-progress.sav");
+        require(window.saveBatteryAs(cleanSave), "Could not save new progress after rejection");
+        window.runUntilWritten(bankdemo::saved_count); QTest::qWait(60);
+        require(!window.running() && !window.engine().batteryDirty(), "Paused stepping was not autosaved");
+        autosave->setInterval(3000); window.loadTeaching();
 
         // Screenshots for documentation: mid-lesson, where the outline leads the picture.
         if (argc>1) {

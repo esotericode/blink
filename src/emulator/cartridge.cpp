@@ -92,27 +92,57 @@ CartridgeInfo describeCartridge(std::span<const std::uint8_t> rom) {
     info.headerChecksumValid = checksum == info.headerChecksum;
     info.headerRomBytes = info.romSizeCode <= 0x08 ? std::size_t(32 * 1024) << info.romSizeCode : 0;
     info.headerRamBytes = ramBytes(info.ramSizeCode);
-    const auto found = std::find_if(std::begin(types), std::end(types), [&](const Type& t) { return t.code == info.type; });
+    // SameBoy rounds to at least 32 KiB and pads with $FF before detecting
+    // multicarts. Use that same address space, including its MMM01 rotation.
+    std::size_t mappedSize = 0x8000;
+    while (mappedSize < rom.size()) mappedSize *= 2;
+    auto byte = [&](std::size_t offset) { return offset < rom.size() ? rom[offset] : std::uint8_t(0xFF); };
+    const bool rotated = info.type >= 0x0B && info.type <= 0x0D;
+    auto configuredByte = [&](std::size_t offset) {
+        if (rotated) offset = (offset + 0x8000) % mappedSize;
+        return byte(offset);
+    };
+    auto note = [&](const char* text) { if (!info.note.empty()) info.note += " "; info.note += text; };
+    auto effective = info.type;
+    const auto tail = mappedSize - 0x8000;
+    bool sameSignature = true;
+    for (std::size_t i = 0; i < 0x30; ++i) sameSignature &= byte(0x104 + i) == byte(tail + 0x104 + i);
+    if (!rotated && sameSignature) {
+        const auto trailing = byte(tail + 0x147);
+        if (trailing >= 0x0B && trailing <= 0x0D) effective = trailing;
+        else if (trailing == 0x11) effective = 0x0B;
+        if (effective >= 0x0B && effective <= 0x0D && effective != info.type)
+            note("Multicart detected from the trailing header; SameBoy uses MMM01.");
+    }
+    const bool tpp1 = configuredByte(0x147) == 0xBC && configuredByte(0x149) == 0xC1 && configuredByte(0x14A) == 0x65;
+    if (tpp1) effective = 0xBC;
+    else if (!(effective >= 0x0B && effective <= 0x0D) && configuredByte(0x147) == 0 && mappedSize > 0x8000) {
+        effective = 0x11;
+        note("The header says there is no MBC, but the mapped ROM is larger than 32 KiB; SameBoy treats it as MBC3.");
+    }
+    auto findType = [](std::uint8_t code) {
+        return std::find_if(std::begin(types), std::end(types), [=](const Type& t) { return t.code == code; });
+    };
+    auto found = findType(effective);
+    if (found != std::end(types) && found->supported && !found->ram && found->mbc != Mbc::None && configuredByte(0x149)) {
+        // The pinned core advances to the next controller variant on a
+        // contradictory RAM-size declaration (even MBC3 TIMER -> TIMER+RAM).
+        effective = std::uint8_t(effective + 1);
+        found = findType(effective);
+        note("The header also declares a RAM size; SameBoy selects the next controller variant with RAM.");
+    }
+    info.effectiveType = effective;
     if (found != std::end(types)) {
         info.mbc = found->mbc; info.typeName = found->name; info.ram = found->ram; info.battery = found->battery;
         info.timer = found->timer; info.rumble = found->rumble; info.supported = found->supported;
-    } else if (info.type == 0xBC && rom[0x149] == 0xC1 && rom[0x14A] == 0x65) {
-        info.mbc = Mbc::Tpp1; info.typeName = "TPP1"; info.ram = info.battery = info.timer = info.rumble = true;
+    } else if (tpp1) {
+        info.mbc = Mbc::Tpp1; info.typeName = "TPP1"; info.ram = info.timer = true;
+        info.battery = configuredByte(0x153) & 8;
+        info.rumble = configuredByte(0x153) & 1;
     } else {
         info.mbc = Mbc::Unknown; info.typeName = "unknown type"; info.supported = false;
     }
     if (info.mbc == Mbc::Mbc2) info.headerRamBytes = 512; // built-in 512 x 4-bit RAM
-    // The same heuristics SameBoy applies when the header and file disagree.
-    if (info.mbc == Mbc::None && rom.size() > 0x8000) {
-        info.mbc = Mbc::Mbc3;
-        info.note = "The header says there is no MBC, but the file is larger than 32 KiB; SameBoy treats it as MBC3.";
-    } else if (rom.size() >= 0x8000 && info.mbc != Mbc::Mmm01 &&
-               std::memcmp(rom.data() + 0x104, rom.data() + rom.size() - 0x8000 + 0x104, 0x30) == 0 &&
-               (rom[rom.size() - 0x8000 + 0x147] == 0x0B || rom[rom.size() - 0x8000 + 0x147] == 0x0C ||
-                rom[rom.size() - 0x8000 + 0x147] == 0x0D) && rom.size() > 0x8000) {
-        info.mbc = Mbc::Mmm01; info.typeName = "MMM01 (multicart)";
-        info.note = "Multicart detected from the header at the end of the file; SameBoy uses MMM01.";
-    }
     if (info.mbc == Mbc::Mmm01 && info.note.empty()) {
         info.note = "MMM01 multicarts are rearranged in emulator memory; bank file offsets shown may not match the file.";
     }

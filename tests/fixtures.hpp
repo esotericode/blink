@@ -3,6 +3,33 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <vector>
+
+// Two writes to the same CPU address in different MBC5 RAM banks, then return
+// to bank 0. The newest bus-address match is deliberately the wrong writer.
+inline std::vector<std::uint8_t> bankedRamFixture() {
+    std::vector<std::uint8_t> rom(observatory::demo::rom.begin(), observatory::demo::rom.end());
+    rom.resize(65536, 0xFF);
+    rom[0x147] = 0x1B; rom[0x148] = 1; rom[0x149] = 3;
+    const std::uint8_t code[] = {
+        0xF3, 0x3E, 0x0A, 0xEA, 0x00, 0x00,
+        0xAF, 0xEA, 0x00, 0x40,
+        0x3E, 0x11, 0xEA, 0x00, 0xA0,
+        0x3E, 0x01, 0xEA, 0x00, 0x40,
+        0x3E, 0x22, 0xEA, 0x00, 0xA0,
+        0xAF, 0xEA, 0x00, 0x40, 0x76, 0x18, 0xFD
+    };
+    std::copy(std::begin(code), std::end(code), rom.begin() + 0x150);
+    return rom;
+}
+
+inline std::vector<std::uint8_t> multicartFixture(std::uint8_t trailingType = 0x0D) {
+    std::vector<std::uint8_t> rom(observatory::demo::rom.begin(), observatory::demo::rom.end());
+    rom.resize(65536, 0xFF);
+    std::copy_n(rom.begin() + 0x104, 0x30, rom.begin() + 0x8104);
+    rom[0x8147] = trailingType; rom[0x8149] = 2;
+    return rom;
+}
 
 // Original hand-assembled fixture: the "shadow OAM" pattern real games use.
 // Fill $C100-$C19F with 0..159, copy a DMA routine into HRAM, enable sprites,

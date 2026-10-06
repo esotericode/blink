@@ -7,7 +7,7 @@
 // Each step is ended by a real emulator event; text is filled from that evidence.
 namespace observatory {
 enum class LessonStep { Start, Holding, Stored, Copied, Drawn, Tile, Done, NeedsTeachingRom,
-                        BankDemo, BankSwitched }; // the last two belong to the bundled bank demo
+                        BankDemo, BankSwitched, FreeExploration };
 inline constexpr int lessonStepCount = 5;
 struct LessonEvidence {
     std::optional<WriteEvent> write;          // The write that ended the step, if any.

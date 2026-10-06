@@ -378,7 +378,7 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
 
     connect(oam_, &QTableWidget::cellClicked, this, [this](int row, int) { selectSprite(row); emit spriteSelected(row); });
     connect(sheet_, &TileSheet::tileClicked, this, [this](int tile) {
-        sprite_ = -1; oam_->clearSelection(); selectTile(tile); emit spriteSelected(-1);
+        selectTile(tile); emit spriteSelected(-1);
     });
     connect(paletteChoice_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { updateViews(); });
     connect(blocks_, &QButtonGroup::idClicked, sheet_, &TileSheet::setBlock);
@@ -407,13 +407,13 @@ void TileInspector::setSnapshot(const Snapshot& snapshot) {
             .arg(link(snapshot.dmaCopying->sourceOf(0))).arg(snapshot.dmaCopying->requestStartTicks));
     } else if (!snapshot.dma.empty()) {
         const auto& d = snapshot.dma.back();
-        oamSource_->setText(QString("OAM last filled by <b>DMA</b>: a hardware copy of %1–%2 (a \"shadow\" sprite table), "
-                                    "requested by %3 at t=%4; %5 bytes changed.")
+        oamSource_->setText(QString("Most recent observed <b>DMA</b> request: %1–%2 (often a shadow sprite table), "
+                                    "requested by %3 at t=%4; %5 OAM bytes differed when checked. Later CPU stores may change OAM.")
             .arg(link(d.sourceOf(0)), q(hex(d.sourceOf(oamBytes - 1))),
                  d.instruction ? q(hex(d.instruction->pc)).toHtmlEscaped() : QString("an unrecorded instruction"))
             .arg(d.requestStartTicks).arg(d.changed()));
     } else {
-        oamSource_->setText(snapshot.traceEnabled ? "No OAM DMA seen since capture began: OAM changes come from CPU stores."
+        oamSource_->setText(snapshot.traceEnabled ? "No OAM DMA request captured in this window. Earlier or unobserved copies may still have changed OAM."
                                                   : "Capture writes is off: OAM DMA copies are not recorded.");
     }
     haveData_ = true;
@@ -422,7 +422,7 @@ void TileInspector::setSnapshot(const Snapshot& snapshot) {
         const auto s = sprite(video_.oam, i);
         const bool visible = s.onScreen(height);
         const QStringList values{QString::number(i), QString::number(s.y), QString::number(s.x), QString::number(s.tile), q(hex(s.flags, 2))};
-        const auto where = visible ? QString("Sprite %1 on screen at x=%2, y=%3").arg(i).arg(s.screenX()).arg(s.screenY())
+        const auto where = visible ? QString("Sprite %1's rectangle overlaps the screen at x=%2, y=%3").arg(i).arg(s.screenX()).arg(s.screenY())
                                    : QString("Sprite %1 is off-screen").arg(i);
         for (int c = 0; c < 5; ++c) {
             auto* item = oam_->item(i, c);
@@ -436,7 +436,8 @@ void TileInspector::setSnapshot(const Snapshot& snapshot) {
     updateViews();
 }
 void TileInspector::selectSprite(int index) {
-    sprite_ = index;
+    sprite_ = index >= 0 && index < spriteCount ? index : -1;
+    index = sprite_;
     if (index < 0) { oam_->clearSelection(); updateViews(); return; }
     oam_->selectRow(index);
     oam_->scrollToItem(oam_->item(index, 0));
@@ -445,12 +446,21 @@ void TileInspector::selectSprite(int index) {
     updateViews();
 }
 void TileInspector::selectTile(int tile) {
+    sprite_ = -1; oam_->clearSelection();
     sheet_->setSelected(std::clamp(tile, 0, tileCount - 1));
     updateViews();
+}
+void TileInspector::resetSelection() {
+    sprite_ = -1; haveData_ = false; oam_->clearSelection();
+    sheet_->setSelected(2); paletteChoice_->setCurrentIndex(0);
 }
 void TileInspector::updateViews() {
     if (!haveData_) return;
     const int height = video_.lcdc & 0x04 ? 16 : 8;
+    if (sprite_ >= 0) {
+        const auto selected = sprite(video_.oam, sprite_);
+        sheet_->setSelected(height == 16 ? selected.tile & 0xFE : selected.tile);
+    }
     std::set<int> spriteTiles, mapTiles;
     QStringList users;
     const int tile = sheet_->selected();

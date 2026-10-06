@@ -44,6 +44,7 @@ public:
     void loadBankDemo();
     // Writes battery-backed cartridge RAM now; false when there is none or it failed.
     bool saveBattery();
+    bool saveBatteryAs(const QString& path);
     QString batteryPath() const { return savePath_; }
     void setMemoryBase(std::uint16_t base);
     void selectAddress(std::uint16_t address);
@@ -69,8 +70,13 @@ private:
     void restart();
     void warmTeaching();
     void warmBankDemo();
-    void loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath);
+    bool loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath);
     bool loadBatteryFile();
+    // Before closing or replacing the game: save dirty battery RAM, or ask the
+    // user (save elsewhere / discard / cancel) when saving fails. `action`
+    // completes "...before <action>", e.g. "closing".
+    bool preserveBattery(const QString& action);
+    void updateBatteryStatus();
     void afterLoad();
     LessonStep idleLessonStep() const;
     QString romLabel(std::uint16_t address) const;
@@ -78,6 +84,7 @@ private:
     void updateSelection();
     void updatePanels(bool force);
     void inspectMovement();
+    void leaveLesson();
     void setLessonStep(LessonStep step, const LessonEvidence& evidence = {}, const QString& problem = {});
     void showLicenses();
     bool ownsKeyboard(QWidget* widget) const;
@@ -89,15 +96,19 @@ private:
     std::uint16_t memoryBase_ = 0xC000, selectedAddress_ = 0xC000;
     std::optional<std::uint64_t> selectedEvent_;
     LessonStep lessonStep_ = LessonStep::Start;
+    std::uint8_t lessonStartX_{};
+    std::uint64_t lessonStartFrame_{};
     QTimer timer_;
     QElapsedTimer wall_, published_;
     std::uint64_t runStartTick_{};
     QAction *runAction_{}, *stepAction_{}, *frameAction_{}, *untilAction_{}, *traceAction_{};
     QAction *spritesAction_{}, *changesAction_{};
-    QAction* saveBatteryAction_{};
+    QAction *saveBatteryAction_{}, *saveBatteryAsAction_{};
     QMenu* viewMenu_{};
     QString romName_, savePath_;
-    QElapsedTimer batteryTimer_;
+    QString batteryProblem_;
+    bool batteryBlocked_{};
+    QTimer batteryTimer_;
     GameView* game_{};
     SystemDiagram* diagram_{};
     TileInspector* tiles_{};
@@ -107,6 +118,7 @@ private:
     QLabel *badge_{}, *cursor_{}, *frameLabel_{}, *instruction_{}, *flags_{}, *writer_{}, *selection_{}, *window_{};
     std::array<QLabel*, 4> flagChips_{};
     QLabel *activityLabel_{}, *traceStatus_{}, *lessonProgress_{}, *lessonHeading_{}, *lessonBody_{};
+    QLabel* batteryStatus_{};
     QPushButton *lessonAction_{}, *lessonStop_{}, *lessonFollow_{};
     QTableWidget *registers_{}, *memory_{}, *writes_{};
     QComboBox* region_{};

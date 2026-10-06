@@ -62,7 +62,11 @@ The Windows build is not code-signed, so SmartScreen may ask first
   a `.sav` file next to the ROM (same name), automatically every few seconds
   while it changes, when you open another game, and on exit (File › Save
   battery RAM now: Ctrl+S). The format is SameBoy's: raw RAM, plus a clock
-  footer for MBC3/HuC3/TPP1 clocks.
+  footer for MBC3/HuC3/TPP1 clocks. Autosaving also works while paused. If
+  saving fails, closing or opening another game asks first: save elsewhere,
+  discard the unsaved progress, or cancel and keep playing. The Cartridge panel
+  shows the destination and error, with Retry and **Save battery RAM as**.
+  Unreadable or malformed existing saves are protected from automatic overwrite.
 - **OAM DMA as a writer**: most commercial games build their sprite table in
   work RAM and copy it into OAM with the hardware's DMA (writing a page number
   to `$FF46`). The app records each request with the instruction that made it
@@ -80,6 +84,12 @@ The Windows build is not code-signed, so SmartScreen may ask first
   translucent shadow.
 
 Panels dock, tab, float, and close; **View › Reset layout** restores them.
+Tile-row and memory-map links reveal the selected byte in Memory. Sprite
+selection follows tile changes as the game animates; choosing a tile manually
+pins that tile. Browsing while paused preserves the last activity interval.
+Manual execution, input, or capture changes leave the guided lesson for free
+exploration; starting again establishes a fresh frame. The lesson pairs real
+instructions and values with prediction and explanation prompts.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy
 A/B/Select/Start; this game only uses directions. Game keys work while tables
 have focus, text fields keep their keys, and Enter still activates a focused
@@ -163,7 +173,7 @@ cmake --install build --prefix out\install
 cpack --config build\CPackConfig.cmake -B out
 ```
 
-This writes `out\console-observatory-0.4.0-windows-x64.zip` (about 12 MB). Installing runs
+This writes `out\console-observatory-0.5.0-windows-x64.zip` (about 12 MB). Installing runs
 `windeployqt` (through Qt's CMake deployment support), which copies the Qt
 DLLs, platform and style plugins, the MinGW runtime, and a `qt.conf` beside
 `console-observatory.exe`. Unzip anywhere and run the `.exe`; the target
@@ -184,7 +194,7 @@ from one commit, runs the same checks as CI on each, and publishes them with
 in `CMakeLists.txt`, then push a tag:
 
 ```bash
-git tag v0.5.0 && git push origin v0.5.0
+git tag v0.6.0 && git push origin v0.6.0
 ```
 
 To release an earlier commit, run the workflow by hand (Actions › Release ›
@@ -228,7 +238,7 @@ The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 cmake --install build --prefix "$PWD/out/install"
 ./out/install/bin/console-observatory
 cpack --config build/CPackConfig.cmake -B out
-sudo apt install ./out/console-observatory_0.4.0_amd64.deb
+sudo apt install ./out/console-observatory_0.5.0_amd64.deb
 console-observatory
 ```
 
@@ -299,7 +309,7 @@ not verified yet. Build without verification executables with
 
 ## Verification and next milestone
 
-Five CTest suites: engine behavior (twelve groups), rendered native Qt widgets,
+Five CTest suites: engine behavior (including save/bank/pacing regressions), rendered native Qt widgets,
 deterministic ROM generation, vendored source integrity, and a check that every
 tooltip the interface uses exists in the glossary and stays short. The engine suite
 compares full SameBoy save-state bytes, registers, WRAM, VRAM, OAM, frame

@@ -47,7 +47,9 @@ public:
     // Battery-backed cartridge RAM (and clock) in SameBoy's .sav format; empty
     // when the cartridge has no battery.
     std::vector<std::uint8_t> batteryData() const;
-    void loadBattery(std::span<const std::uint8_t> data);
+    // Validate before changing RAM. Accept complete RAM and recognized clock
+    // footers; false leaves the current state and dirty flag untouched.
+    bool loadBattery(std::span<const std::uint8_t> data);
     bool batteryDirty() const;
     void clearBatteryDirty();
 private:

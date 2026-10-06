@@ -12,6 +12,7 @@ enum class Mbc { None, Mbc1, Mbc2, Mbc3, Mbc5, Mbc6, Mbc7, Mmm01, Huc1, Huc3, Ca
 struct CartridgeInfo {
     std::string title;
     std::uint8_t type{}, romSizeCode{}, ramSizeCode{}, cgbFlag{}, sgbFlag{}, headerChecksum{};
+    std::uint8_t effectiveType{};      // controller variant chosen by the pinned core's heuristics
     Mbc mbc = Mbc::None;
     std::string typeName;            // e.g. "MBC1+RAM+BATTERY"
     bool ram{}, battery{}, timer{}, rumble{};

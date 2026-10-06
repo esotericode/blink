@@ -241,3 +241,35 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   v0.4.0 (DMA, tooltips; latest), each built from the last commit of that version.
   v0.1.0 was Linux-only and predates the packaging the workflow expects, so
   it has no release. Older notes say they are superseded.
+
+## 2026-10-06 — Save safety and explanation consistency
+
+- Validate ROM controller support in Engine before replacing state. Battery
+  buffers must hold complete RAM and a recognized footer; rejection changes
+  neither state nor the dirty flag. The pinned loader copies a full RTC union
+  using the total buffer length, so recognized shorter legacy RTC buffers are
+  backed by a padded allocation while retaining their original logical size.
+  Vendor source remains byte-for-byte upstream.
+- Use the core's public battery-size API for export capability. Decode the
+  same padded ROM, trailing MMM01, ROM-only fallback, and RAM-recovery order
+  for displayed effective controller facts; retain the declared header type
+  and explain disagreement.
+- Failed disk saving retains the engine. A rejected existing save is protected
+  until the user explicitly chooses a destination. Closing or switching games
+  with progress that cannot be saved asks (save elsewhere / discard / cancel,
+  Cancel by default) instead of refusing outright: review found that a refusal
+  with no discard path could make the app impossible to quit, even at system
+  shutdown. An independent Qt timer
+  saves dirty RAM while paused; restart carries unsaved battery status.
+- Last retained CPU attempts resolve banked/mirrored cartridge RAM storage.
+  Historical selections name the recorded bank separately from the current
+  mapping. DMA language describes requests and later comparisons, never
+  inferring per-byte provenance or excluding an unobserved DMA request.
+- External execution, input, focus loss, and capture changes leave the active
+  lesson. Starting the movement lesson resets to a known completed frame;
+  each store/output is checked before the next success page. Add short
+  prediction/explanation prompts and plain-language register-to-variable moves.
+- Preserve the last activity interval during same-tick UI browsing, follow
+  animated sprite tiles, pin manually chosen tiles, reveal linked Memory,
+  and label picture age relative to current state. Native widget regressions
+  exercise these interactions alongside save failure and recovery.

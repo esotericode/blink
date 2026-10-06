@@ -28,6 +28,12 @@ int lessonStepNumber(LessonStep step) {
 }
 LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& e) {
     switch (step) {
+    case LessonStep::FreeExploration:
+        return {"Explore the teaching game",
+                "You changed execution or input outside the guided lesson. The inspectors now show your exploration; "
+                "the earlier lesson stop no longer describes this state.<br><br>Use F10 for one instruction, F11 for the next picture, "
+                "or F9 to stop on a selected write. To follow one press again, start from a fresh completed frame below.",
+                "Start fresh and hold Right"};
     case LessonStep::NeedsTeachingRom:
         return {"Exploring your own ROM",
                 "Every panel shows this game's real state: CPU, memory, sprites and tiles, the memory map, and the "
@@ -59,8 +65,9 @@ LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& 
         return {"Follow one press of Right",
                 "Watch a button press travel through the machine:<br><b>joypad → CPU → WRAM (" + code("player_x") +
                 ") → CPU → OAM (sprite X) → PPU → LCD</b>.<br><br>Each step runs the real emulator until a specific "
-                "event happens, then pauses so every panel shows the same moment. The star is at player_x = " +
-                std::to_string(s.playerX) + ".",
+                "event happens, then pauses. CPU and memory share a boundary; the picture has its own completed-frame time. "
+                "WRAM is work RAM; OAM holds sprite records; the PPU draws pixels for the LCD screen.<br><br>"
+                "Starting resets the teaching game to a known frame. Predict: does changing player_x change the picture immediately?",
                 "1 · Hold Right"};
     case LessonStep::Holding:
         return {"Step 1 of 5 · The joypad",
@@ -75,8 +82,10 @@ LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& 
                 "Paused right after " + writer(e) + ". It wrote <b>" + (e.write ? value(e.write->requested) : "?") +
                 "</b> to " + code("player_x") + " at " + code("$C000") + "; the byte held " +
                 (e.write ? value(e.write->before) : "?") + " before. " + effort(e) + "<br><br>"
-                "The memory inspector has " + code("$C000") + " selected (gold means changed) and register A still holds "
-                "the stored value. The picture has <b>not</b> changed: so far only one byte of work RAM has.",
+                "In plain language: <b>copy A = " + std::to_string(s.registers.af >> 8) + " into player_x</b>. "
+                "The memory inspector has " + code("$C000") + " selected (gold means changed). "
+                "The picture is still output #" + std::to_string(s.frames) + ": <b>not changed</b>. "
+                "This instruction changed work RAM; the picture has not yet caught up. Next, watch the CPU update sprite memory.",
                 "3 · Run until OAM X is written"};
     case LessonStep::Copied:
         return {"Step 3 of 5 · The CPU copies the position into OAM",
@@ -84,7 +93,7 @@ LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& 
                 "</b> into sprite 0's X byte at " + code("$FE01") + ". Object Attribute Memory holds 40 four-byte "
                 "sprite records: Y+16, X+8, tile, attributes. " + effort(e) + "<br><br>The " + mark("outline") +
                 " on the game shows where OAM now places the sprite, but the picture is still the earlier frame: "
-                "the PPU has not drawn since this write.",
+                "no new completed picture has arrived since this write.<br><br><b>Predict:</b> what will the next frame show?",
                 "4 · Advance one frame"};
     case LessonStep::Drawn:
         return {"Step 4 of 5 · The PPU draws the new frame",
@@ -92,7 +101,7 @@ LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& 
                 "tile from VRAM. The star moved one pixel to the right: <b>" + std::to_string(e.changedPixels) +
                 " pixels</b> differ from output #" + std::to_string(s.previousFrame) + " (" + mark("marked") +
                 ").<br><br>A frame takes 70,224 CPU clock cycles, about 16.7 ms. The CPU's write happened earlier; "
-                "the screen only shows it once the PPU draws.",
+                "the screen only shows it once the PPU draws.<br><br><b>Explain:</b> why did changing memory and seeing the change happen at different times?",
                 "5 · Show the tile bits"};
     case LessonStep::Tile:
         return {"Step 5 of 5 · Tile bits become pixels",
