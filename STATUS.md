@@ -49,7 +49,8 @@ Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
   registers), storage disassembly, change highlighting, source-gated names,
   bounded last-writer evidence, linked selection across panels.
 - Reproducible ROM/symbols/embedding without RGBDS; Linux `.deb` and Windows
-  portable ZIP (windeployqt) packaging; Linux and Windows CI.
+  portable ZIP (windeployqt) packaging; Linux and Windows CI; a Release
+  workflow that builds, verifies, and publishes both packages per version.
 
 ## Verified
 

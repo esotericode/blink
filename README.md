@@ -14,6 +14,15 @@ use works offline in one executable with ordinary Qt runtime libraries. No
 browser, local server, account, backend, or proprietary boot ROM is required,
 and no commercial game is included.
 
+## Download
+
+Ready-to-run builds are on the
+[Releases page](https://github.com/esotericode/blink/releases): a portable ZIP
+for Windows 10/11 (unzip, run `console-observatory.exe`) and a `.deb` for
+Ubuntu 24.04 (`sudo apt install ./console-observatory_<version>_amd64.deb`).
+The Windows build is not code-signed, so SmartScreen may ask first
+(**More info → Run anyway**). Each release lists SHA-256 checksums.
+
 ## What you can do
 
 - **Follow one press of Right** (Lesson panel). Five steps, each ended by a
@@ -165,6 +174,22 @@ Windows SmartScreen may ask for confirmation the first time.
 `console-observatory.exe --screenshot shot.png` renders the window to an image
 and exits; CI uses it to launch the packaged app with Qt and MinGW removed
 from `PATH`.
+
+### Publishing a release
+
+`.github/workflows/release.yml` builds the Windows ZIP and the Ubuntu `.deb`
+from one commit, runs the same checks as CI on each, and publishes them with
+`SHA256SUMS.txt` as a GitHub release. Write the notes in
+`docs/releases/vX.Y.Z.md` (first line `# Title`), bump `project(... VERSION)`
+in `CMakeLists.txt`, then push a tag:
+
+```bash
+git tag v0.5.0 && git push origin v0.5.0
+```
+
+To release an earlier commit, run the workflow by hand (Actions › Release ›
+Run workflow) with the tag and the full commit SHA. The workflow refuses a tag
+that does not match the commit's project version.
 
 ## ROM source and rebuilding
 

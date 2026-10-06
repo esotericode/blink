@@ -224,3 +224,20 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   newcomer (each term explained where it is used). Review corrected two drafts
   (instructions per frame, sprite overlap priority) before publishing.
 - Version 0.4.0.
+
+## 2026-10-06 — GitHub releases
+
+- Releases are built by CI, not uploaded from a developer machine: the Release
+  workflow checks out the exact commit, runs the same suites as CI (including
+  the native-platform widget suite and, on Windows, a launch of the unzipped
+  package with only System32 on `PATH`), and only then attaches the files. A
+  draft is created first and published last, so a failed build never leaves
+  a half-filled public release. `SHA256SUMS.txt` is computed from the attached
+  files.
+- The tag must match `project(... VERSION)` at that commit, so file names,
+  About box, and tag agree. Notes live in the repository
+  (`docs/releases/<tag>.md`) and are reviewed like code.
+- First releases: v0.2.0 (first Windows build), v0.3.0 (any ROM, banks), and
+  v0.4.0 (DMA, tooltips; latest), each built from the last commit of that version.
+  v0.1.0 was Linux-only and predates the packaging the workflow expects, so
+  it has no release. Older notes say they are superseded.
