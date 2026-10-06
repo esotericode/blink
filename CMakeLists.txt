@@ -1,18 +1,46 @@
 cmake_minimum_required(VERSION 3.22)
-project(ConsoleObservatory VERSION 0.1.0 LANGUAGES C CXX)
+project(ConsoleObservatory VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
-include(CTest)
-find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
-option(OBSERVATORY_STRICT_DEPENDENCIES "Require the reference Qt 6.4.2 version" OFF)
-if(OBSERVATORY_STRICT_DEPENDENCIES)
-    find_package(Qt6 6.4.2 EXACT REQUIRED COMPONENTS Core Gui Widgets)
-else()
-    find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
+
+# SameBoy's core relies on GNU C extensions (case ranges, statement expressions,
+# __attribute__). MSVC's cl.exe cannot compile it; MinGW-w64 GCC can.
+if(MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR
+        "MSVC (cl.exe) cannot compile SameBoy's GNU C core. On Windows, configure "
+        "with Qt's MinGW-w64 kit instead; see README.md, \"Build and run — Windows\".")
 endif()
+
+# A Windows install is a portable folder: the executable, its deployed Qt DLLs,
+# and qt.conf sit together at the root. Linux keeps the FHS bin/ + share/ layout.
+if(WIN32)
+    set(CMAKE_INSTALL_BINDIR "." CACHE PATH "Executable directory inside the install prefix")
+    set(OBSERVATORY_DATA_DIR ".")
+else()
+    set(OBSERVATORY_DATA_DIR "share/console-observatory")
+endif()
+include(GNUInstallDirs)
+include(CTest)
+
+option(OBSERVATORY_BUILD_GUI "Build the Qt desktop application and its widget tests" ON)
+option(OBSERVATORY_STRICT_DEPENDENCIES "Require the reference Qt 6.4.2 version" OFF)
+option(OBSERVATORY_DEPLOY_QT "Copy Qt runtime DLLs/plugins into a Windows install (needs windeployqt)" ${WIN32})
+
+find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
+if(OBSERVATORY_BUILD_GUI)
+    if(OBSERVATORY_STRICT_DEPENDENCIES)
+        find_package(Qt6 6.4.2 EXACT REQUIRED COMPONENTS Core Gui Widgets)
+    else()
+        find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets)
+    endif()
+endif()
+
+set(observatory_warnings
+    "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>"
+    "$<$<CXX_COMPILER_ID:MSVC>:/W4>")
 
 set(SAMEBOY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sameboy)
 set(SAMEBOY_SOURCES apu camera display gb joypad mbc memory printer random
@@ -25,6 +53,11 @@ target_compile_definitions(sameboy PRIVATE GB_INTERNAL _GNU_SOURCE GB_VERSION="1
 # Public flags must match the layout used by every consumer of raw gb.h.
 target_compile_definitions(sameboy PUBLIC GB_DISABLE_TIMEKEEPING GB_DISABLE_REWIND
     GB_DISABLE_DEBUGGER GB_DISABLE_CHEATS GB_DISABLE_CHEAT_SEARCH)
+# Known-benign upstream diagnostics: four-character save-state block tags, and
+# ELF visibility attributes that PE/COFF (Windows) ignores.
+target_compile_options(sameboy PRIVATE
+    "$<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-multichar>"
+    "$<$<AND:$<BOOL:${WIN32}>,$<C_COMPILER_ID:GNU,Clang>>:-Wno-attributes>")
 if(UNIX)
     target_link_libraries(sameboy PUBLIC m)
 endif()
@@ -39,49 +72,84 @@ add_library(observatory_engine src/emulator/engine.cpp src/emulator/disassembly.
     src/teaching/annotations.cpp ${ROM_OUT}/teaching_rom.hpp)
 target_include_directories(observatory_engine PUBLIC src ${ROM_OUT})
 target_link_libraries(observatory_engine PRIVATE sameboy)
-target_compile_options(observatory_engine PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(observatory_engine PRIVATE ${observatory_warnings})
 
-add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp)
-target_include_directories(observatory_widgets PUBLIC src)
-target_link_libraries(observatory_widgets PUBLIC observatory_engine Qt6::Widgets)
-target_compile_options(observatory_widgets PRIVATE -Wall -Wextra -Wpedantic)
-add_executable(console-observatory src/main.cpp)
-target_link_libraries(console-observatory PRIVATE observatory_widgets)
-install(TARGETS console-observatory RUNTIME DESTINATION bin)
-install(FILES README.md THIRD_PARTY_NOTICES.md
-    DESTINATION share/console-observatory)
-install(FILES LICENSE DESTINATION share/console-observatory/licenses/project)
-install(FILES third_party/sameboy/LICENSE DESTINATION share/console-observatory/licenses/sameboy)
-install(DIRECTORY licenses/ DESTINATION share/console-observatory/licenses)
-install(DIRECTORY rom/ DESTINATION share/console-observatory/rom)
-install(FILES tools/assemble_rom.py DESTINATION share/console-observatory/tools)
+if(OBSERVATORY_BUILD_GUI)
+    add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp)
+    target_include_directories(observatory_widgets PUBLIC src)
+    target_link_libraries(observatory_widgets PUBLIC observatory_engine Qt6::Widgets)
+    target_compile_definitions(observatory_widgets PUBLIC OBSERVATORY_VERSION="${PROJECT_VERSION}")
+    target_compile_options(observatory_widgets PRIVATE ${observatory_warnings})
+    add_executable(console-observatory src/main.cpp)
+    target_link_libraries(console-observatory PRIVATE observatory_widgets)
+    if(WIN32)
+        # GUI subsystem (no console window), plus icon and version resources.
+        set(OBSERVATORY_ICON ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/console-observatory.ico)
+        configure_file(packaging/windows/console-observatory.rc.in
+            ${CMAKE_CURRENT_BINARY_DIR}/console-observatory.rc @ONLY)
+        target_sources(console-observatory PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/console-observatory.rc)
+        set_target_properties(console-observatory PROPERTIES WIN32_EXECUTABLE ON)
+    endif()
+    install(TARGETS console-observatory RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(WIN32 AND OBSERVATORY_DEPLOY_QT)
+        # windeployqt copies the Qt DLLs, platform/style plugins, compiler runtime,
+        # and writes qt.conf, so the installed folder runs on a machine without Qt.
+        if(Qt6_VERSION VERSION_GREATER_EQUAL 6.5)
+            qt_generate_deploy_app_script(TARGET console-observatory
+                OUTPUT_SCRIPT observatory_deploy NO_UNSUPPORTED_PLATFORM_ERROR NO_TRANSLATIONS)
+        else()
+            qt_generate_deploy_app_script(TARGET console-observatory
+                FILENAME_VARIABLE observatory_deploy NO_UNSUPPORTED_PLATFORM_ERROR)
+        endif()
+        install(SCRIPT ${observatory_deploy})
+    endif()
+endif()
+
+install(FILES README.md THIRD_PARTY_NOTICES.md DESTINATION ${OBSERVATORY_DATA_DIR})
+install(FILES LICENSE DESTINATION ${OBSERVATORY_DATA_DIR}/licenses/project)
+install(FILES third_party/sameboy/LICENSE DESTINATION ${OBSERVATORY_DATA_DIR}/licenses/sameboy)
+install(DIRECTORY licenses/ DESTINATION ${OBSERVATORY_DATA_DIR}/licenses)
+install(DIRECTORY rom/ DESTINATION ${OBSERVATORY_DATA_DIR}/rom)
+install(FILES tools/assemble_rom.py DESTINATION ${OBSERVATORY_DATA_DIR}/tools)
 install(FILES ${ROM_OUT}/teaching.gb ${ROM_OUT}/teaching.sym ${ROM_OUT}/manifest.json
-    DESTINATION share/console-observatory/rom)
-install(FILES packaging/console-observatory.desktop DESTINATION share/applications)
-install(FILES packaging/console-observatory.svg DESTINATION share/icons/hicolor/scalable/apps)
+    DESTINATION ${OBSERVATORY_DATA_DIR}/rom)
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/console-observatory.desktop DESTINATION share/applications)
+    install(FILES packaging/console-observatory.svg DESTINATION share/icons/hicolor/scalable/apps)
+endif()
 
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
     add_executable(engine_tests tests/engine_tests.cpp)
     target_link_libraries(engine_tests PRIVATE observatory_engine)
+    target_compile_options(engine_tests PRIVATE ${observatory_warnings})
     add_test(NAME engine COMMAND engine_tests)
-    add_executable(widget_tests tests/widget_tests.cpp)
-    target_link_libraries(widget_tests PRIVATE observatory_widgets Qt6::Test)
-    add_test(NAME widgets COMMAND widget_tests)
-    set_tests_properties(widgets PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    if(OBSERVATORY_BUILD_GUI)
+        find_package(Qt6 REQUIRED COMPONENTS Test)
+        add_executable(widget_tests tests/widget_tests.cpp)
+        target_link_libraries(widget_tests PRIVATE observatory_widgets Qt6::Test)
+        add_test(NAME widgets COMMAND widget_tests)
+        set_tests_properties(widgets PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
     add_test(NAME rom_reproducibility COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/rom_tests.py ${ROM_OUT})
     add_test(NAME vendor_integrity COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/vendor_tests.py)
 endif()
 
-# First packaging target: Ubuntu 24.04's dynamically linked Qt 6 runtime.
-set(CPACK_GENERATOR DEB)
 set(CPACK_PACKAGE_NAME console-observatory)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_VENDOR "Console Observatory contributors")
 set(CPACK_PACKAGE_CONTACT "Console Observatory contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Native Game Boy teaching lab with synchronized CPU and memory inspection")
-set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
-set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6t64 (>= 6.4.2), libqt6gui6t64 (>= 6.4.2), libqt6core6t64 (>= 6.4.2), qt6-qpa-plugins, libstdc++6, libgcc-s1, libc6 (>= 2.38)")
+if(WIN32)
+    # Portable folder in a ZIP; the archive's top-level directory is the app.
+    set(CPACK_GENERATOR ZIP)
+    set(CPACK_PACKAGE_FILE_NAME "console-observatory-${PROJECT_VERSION}-windows-x64")
+else()
+    # Ubuntu 24.04 package using the OS's dynamically linked Qt 6 runtime.
+    set(CPACK_GENERATOR DEB)
+    set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6widgets6t64 (>= 6.4.2), libqt6gui6t64 (>= 6.4.2), libqt6core6t64 (>= 6.4.2), qt6-qpa-plugins, libstdc++6, libgcc-s1, libc6 (>= 2.38)")
+endif()
 include(CPack)

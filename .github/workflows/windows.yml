@@ -1,0 +1,67 @@
+name: Native Windows build
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  build-and-verify:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install official Qt 6.8.3 for MinGW, with its MinGW 13.1 toolchain and Ninja
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          tools: 'tools_mingw1310 tools_ninja'
+          cache: true
+      - name: Build the native application and original ROM with Qt's MinGW kit
+        run: |
+          $tools = "$env:IQTA_TOOLS".Replace('\', '/')
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_C_COMPILER=$tools/mingw1310_64/bin/gcc.exe" `
+            "-DCMAKE_CXX_COMPILER=$tools/mingw1310_64/bin/g++.exe" `
+            "-DCMAKE_MAKE_PROGRAM=$tools/Ninja/ninja.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --parallel
+      - name: Verify core parity, inspection, stepping, widgets (offscreen), ROM, vendor
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify widget interactions on the native Windows platform plugin
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $env:QT_QPA_PLATFORM = 'windows'
+          ./build/widget_tests.exe out/windows-desktop.png out/windows-minimum.png
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Install with windeployqt and package the portable ZIP
+        run: |
+          cmake --install build --prefix out/install
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cpack --config build/CPackConfig.cmake -B out
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem out/*.zip
+      - name: Launch the packaged app from a clean folder without Qt or MinGW on PATH
+        run: |
+          $zip = Get-ChildItem out/console-observatory-*-windows-x64.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath "$env:RUNNER_TEMP/packaged" -Force
+          $app = Get-ChildItem "$env:RUNNER_TEMP/packaged" -Recurse -Filter console-observatory.exe | Select-Object -First 1
+          Get-ChildItem $app.DirectoryName -Recurse -Name
+          # install-qt-action exports QT_PLUGIN_PATH; the package must not depend on it.
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $shot = "$env:GITHUB_WORKSPACE/out/packaged-app.png"
+          $run = Start-Process -FilePath $app.FullName -ArgumentList '--screenshot', $shot -Wait -PassThru
+          if ($run.ExitCode -ne 0 -or -not (Test-Path $shot)) { Write-Error "Packaged app failed: exit $($run.ExitCode)"; exit 1 }
+          Write-Output "Packaged app rendered $shot"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: console-observatory-windows
+          path: |
+            out/*.zip
+            out/*.png
+          if-no-files-found: warn

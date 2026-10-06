@@ -29,6 +29,13 @@
 namespace observatory {
 namespace {
 QString q(const std::string& s) { return QString::fromStdString(s); }
+QFont monospace() {
+    auto font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+#if defined(Q_OS_WIN)
+    font.setFamily("Consolas"); // Qt's Windows fixed-font default is Courier New.
+#endif
+    return font;
+}
 QLabel* label(const QString& text = {}, QWidget* parent = nullptr) {
     auto* result = new QLabel(text, parent);
     result->setWordWrap(true);
@@ -42,7 +49,7 @@ QTableWidget* table(int rows, int columns, const QStringList& headings) {
     t->setSelectionMode(QAbstractItemView::SingleSelection);
     t->verticalHeader()->hide();
     t->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    t->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    t->setFont(monospace());
     t->setShowGrid(false);
     return t;
 }
@@ -176,7 +183,7 @@ void MainWindow::buildUi() {
     registers_->verticalHeader()->setDefaultSectionSize(27);
     cpuLayout->addWidget(registers_);
     instruction_ = label(); instruction_->setObjectName("instructionLabel");
-    instruction_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    instruction_->setFont(monospace());
     cpuLayout->addWidget(instruction_);
     hardware_ = label(); hardware_->setObjectName("hardwareLabel"); cpuLayout->addWidget(hardware_);
     inspectors_->addWidget(cpu);

@@ -23,4 +23,4 @@ jobs:
         run: |
           cmake --install build --prefix "$PWD/out/install"
           cpack --config build/CPackConfig.cmake -B out
-          dpkg-deb --info out/console-observatory_0.1.0_amd64.deb
+          dpkg-deb --info out/console-observatory_*_amd64.deb

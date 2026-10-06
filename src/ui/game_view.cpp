@@ -19,10 +19,13 @@ void GameView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), QColor("#10171d"));
     if (image_.isNull()) return;
-    const double available = std::min(width() / 160.0, height() / 144.0);
+    // Scale by whole *device* pixels so each Game Boy pixel stays square and sharp
+    // under fractional desktop scaling (e.g. Windows at 125% or 150%).
+    const double dpr = devicePixelRatioF();
+    const double available = std::min(width() * dpr / 160.0, height() * dpr / 144.0);
     const double scale = available >= 1 ? std::floor(available) : available;
-    const QSize size(int(160 * scale), int(144 * scale));
-    const QRect target((width()-size.width())/2, (height()-size.height())/2, size.width(), size.height());
+    const double w = 160 * scale, h = 144 * scale;
+    const QRectF target(std::round((width() * dpr - w) / 2) / dpr, std::round((height() * dpr - h) / 2) / dpr, w / dpr, h / dpr);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
     painter.drawImage(target, image_);
 }
