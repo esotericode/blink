@@ -161,9 +161,9 @@ int main(int argc, char** argv) {
         shot("info-3-sprite.png");
         auto* sheet = window.findChild<TileSheet*>("tileSheet");
         require(sheet, "Tile sheet missing");
-        QTest::mouseClick(sheet, Qt::LeftButton, Qt::NoModifier, sheet->rect().center());
-        require(info->selection().kind == InformationKind::Tile && info->selection().index == tiles->selectedTile() &&
-                tiles->selectedSprite() == -1 && body->toPlainText().contains("high × 2 + low"), "Tile click did not explain the bit planes");
+        QTest::mouseClick(sheet, Qt::LeftButton, Qt::NoModifier, QPoint(5,5));
+        require(info->selection().kind == InformationKind::Tile && info->selection().index == tiles->selectedTile(), "Tile click did not select its explanation");
+        require(tiles->selectedSprite() == -1 && body->toPlainText().contains("high × 2 + low"), "Tile explanation lacks the bit-plane decoding");
         shot("info-4-tile.png");
         graphicsTabs->setCurrentIndex(1); QTest::qWait(20);
         auto* tileMap = window.findChild<TileMapView*>("tileMapView");
