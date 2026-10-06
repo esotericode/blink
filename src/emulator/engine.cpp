@@ -15,15 +15,19 @@ struct Engine::Impl {
     std::thread::id owner = std::this_thread::get_id();
     std::size_t capacity;
     std::vector<std::uint8_t> rom;
-    std::array<std::uint32_t, screenPixels> rendering{}, completed{};
-    std::uint64_t ticks{}, instructions{}, frames{}, frameTick{}, eventId{}, evicted{};
+    std::array<std::uint32_t, screenPixels> rendering{}, completed{}, previous{};
+    std::uint64_t ticks{}, instructions{}, frames{}, frameTick{}, eventId{}, evicted{}, previousFrame{};
     std::string frameKind = "No completed frame";
     bool traceEnabled = true, teaching{}, frameArrived{}, inited{};
     std::optional<Instruction> active, lastExecuted;
     std::deque<WriteEvent> history;
     std::array<WriteEvent, 8> pending{};
-    std::size_t pendingCount{};
+    std::size_t pendingCount{}, stepWrites{};
     Activity activity;
+    std::vector<std::uint32_t> writeCounts = std::vector<std::uint32_t>(0x10000);
+    std::vector<std::uint32_t> executionCounts = std::vector<std::uint32_t>(0x10000);
+    std::uint64_t mapStart{};
+    std::uint8_t held{};
 
     explicit Impl(std::size_t limit) : capacity(std::clamp<std::size_t>(limit, 8, 65536)) {}
     ~Impl() { if (inited) GB_free(&gb); }
@@ -38,6 +42,8 @@ struct Engine::Impl {
     }
     static void vblank(GB_gameboy_t* instance, GB_vblank_type_t type) {
         auto& s = self(instance);
+        s.previous = s.completed;
+        s.previousFrame = s.frames;
         s.completed = s.rendering;
         ++s.frames;
         s.frameArrived = true;
@@ -61,6 +67,7 @@ struct Engine::Impl {
         auto& s = self(instance);
         ++s.instructions;
         ++s.activity.instructions;
+        ++s.executionCounts[pc];
         auto i = s.instruction(pc);
         i.bytes[0] = opcode; // Actual fetched opcode; operands are storage observations.
         s.active = i;
@@ -108,6 +115,7 @@ struct Engine::Impl {
         int region = address < 0x8000 || (address >= 0xA000 && address < 0xC000) ? 0 :
                      address < 0xA000 ? 1 : address < 0xFE00 ? 2 : address < 0xFF00 ? 3 : 4;
         ++s.activity.writes[region];
+        ++s.writeCounts[address];
         if (s.pendingCount == s.pending.size()) { ++s.evicted; return true; }
         auto& event = s.pending[s.pendingCount++];
         event = {};
@@ -124,6 +132,11 @@ struct Engine::Impl {
         event.requested = value;
         return true; // Observation must never suppress a core write.
     }
+    void clearMap() {
+        std::fill(writeCounts.begin(), writeCounts.end(), 0);
+        std::fill(executionCounts.begin(), executionCounts.end(), 0);
+        mapStart = ticks;
+    }
     StepResult atomic() {
         assertOwner();
         active.reset();
@@ -139,6 +152,7 @@ struct Engine::Impl {
             if (history.size() == capacity) { history.pop_front(); ++evicted; }
             history.push_back(event);
         }
+        stepWrites = pendingCount;
         return {active.has_value(), frameArrived, elapsed};
     }
 };
@@ -165,7 +179,7 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     GB_set_rgb_encode_callback(&s.gb, Impl::encode);
     GB_set_palette(&s.gb, &GB_PALETTE_DMG);
     s.rendering.fill(0xFFCADC9Fu);
-    s.completed = s.rendering;
+    s.completed = s.previous = s.rendering;
     GB_set_pixels_output(&s.gb, s.rendering.data());
     GB_set_vblank_callback(&s.gb, Impl::vblank);
     GB_set_execution_callback(&s.gb, Impl::execution);
@@ -174,14 +188,17 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     GB_set_turbo_mode(&s.gb, true, true);
     GB_load_boot_rom_from_buffer(&s.gb, demo::boot.data(), demo::boot.size());
     GB_load_rom_from_buffer(&s.gb, s.rom.data(), s.rom.size());
-    s.ticks = s.instructions = s.frames = s.frameTick = s.eventId = s.evicted = 0;
+    s.ticks = s.instructions = s.frames = s.frameTick = s.eventId = s.evicted = s.previousFrame = 0;
     s.history.clear(); s.active.reset(); s.lastExecuted.reset(); s.activity = {};
+    s.held = 0; s.clearMap();
     s.frameKind = "No completed frame";
 }
 void Engine::restart() { loadRom(impl_->rom); }
 void Engine::setButton(Button button, bool down) {
     impl_->assertOwner();
     GB_set_key_state(&impl_->gb, static_cast<GB_key_t>(button), down);
+    const auto bit = std::uint8_t(1u << static_cast<unsigned>(button));
+    impl_->held = down ? impl_->held | bit : impl_->held & ~bit;
 }
 void Engine::releaseButtons() {
     for (int i = 0; i < 8; ++i) setButton(static_cast<Button>(i), false);
@@ -193,6 +210,7 @@ void Engine::setTraceEnabled(bool enabled) {
     GB_set_write_memory_callback(&s.gb, enabled ? Impl::write : nullptr);
     // Old writers could be stale after an unobserved interval. Clear the capture.
     s.history.clear(); s.evicted = 0; s.activity = {}; s.activity.startTicks = s.ticks;
+    s.clearMap();
 }
 StepResult Engine::stepInstruction() {
     auto start = ticks();
@@ -211,6 +229,25 @@ StepResult Engine::stepFrame() {
         if (ticks() - start > 4 * 70224 * 2) break;
     }
     return {false, false, ticks() - start};
+}
+WatchResult Engine::runUntilWrite(std::uint16_t address, std::uint64_t limitTicks) {
+    auto& s = *impl_; s.assertOwner();
+    WatchResult result;
+    if (!s.traceEnabled) { result.stop = WatchResult::Stop::CaptureOff; return result; }
+    const auto target = canonicalAddress(address);
+    const auto ticks0 = s.ticks, instructions0 = s.instructions, frames0 = s.frames;
+    for (unsigned calls = 0; calls < 4000000 && s.ticks - ticks0 < limitTicks && !result.write; ++calls) {
+        s.atomic();
+        // This step's records are the newest; capacity (>= 8) always retains them.
+        for (auto i = s.history.size() - std::min(s.stepWrites, s.history.size()); i < s.history.size(); ++i) {
+            if (s.history[i].canonicalAddress == target) { result.write = s.history[i]; break; }
+        }
+    }
+    result.stop = result.write ? WatchResult::Stop::Write : WatchResult::Stop::Limit;
+    result.advancedTicks = s.ticks - ticks0;
+    result.instructions = s.instructions - instructions0;
+    result.frames = s.frames - frames0;
+    return result;
 }
 void Engine::advanceTo(std::uint64_t targetTicks, std::chrono::microseconds budget) {
     const auto deadline = std::chrono::steady_clock::now() + budget;
@@ -240,10 +277,21 @@ Snapshot Engine::snapshot(std::uint16_t memoryBase) {
         out.memory[i] = s.inspect(out.memoryBase + i);
         out.memoryAvailable[i] = s.available(out.memoryBase + i);
     }
-    for (unsigned i = 0; i < out.sprite.size(); ++i) out.sprite[i] = s.inspect(0xFE00 + i);
+    auto copyStorage = [&](GB_direct_access_t type, auto& destination) {
+        std::size_t size = 0;
+        auto* bytes = static_cast<const std::uint8_t*>(GB_get_direct_access(&s.gb, type, &size, nullptr));
+        if (bytes) std::copy_n(bytes, std::min(size, destination.size()), destination.begin());
+    };
+    copyStorage(GB_DIRECT_ACCESS_VRAM, out.video.vram);
+    copyStorage(GB_DIRECT_ACCESS_OAM, out.video.oam);
+    auto& v = out.video;
+    v.lcdc = s.inspect(0xFF40); v.stat = s.inspect(0xFF41); v.scy = s.inspect(0xFF42); v.scx = s.inspect(0xFF43);
+    v.ly = s.inspect(0xFF44); v.lyc = s.inspect(0xFF45); v.bgp = s.inspect(0xFF47); v.obp0 = s.inspect(0xFF48);
+    v.obp1 = s.inspect(0xFF49); v.wy = s.inspect(0xFF4A); v.wx = s.inspect(0xFF4B);
     out.playerX = s.inspect(demo::player_x); out.playerY = s.inspect(demo::player_y);
-    out.buttons = s.inspect(demo::buttons); out.ly = s.inspect(0xFF44); out.lcdc = s.inspect(0xFF40);
+    out.buttons = s.inspect(demo::buttons); out.heldButtons = s.held;
     out.pixels = s.completed;
+    out.previousPixels = s.previous; out.previousFrame = s.previousFrame;
     out.writes.assign(s.history.begin(), s.history.end());
     out.activity = s.activity; out.activity.endTicks = s.ticks;
     s.activity = {}; s.activity.startTicks = s.ticks;
@@ -256,6 +304,13 @@ std::vector<std::uint8_t> Engine::stateBytes() const {
     GB_save_state_to_buffer(instance, state.data());
     return state;
 }
+void Engine::activityMap(ActivityMap& out) const {
+    const auto& s = *impl_; s.assertOwner();
+    out.startTicks = s.mapStart; out.endTicks = s.ticks; out.writesObserved = s.traceEnabled;
+    out.writes = s.writeCounts; out.executions = s.executionCounts;
+}
+void Engine::clearActivityMap() { impl_->assertOwner(); impl_->clearMap(); }
+std::uint8_t Engine::heldButtons() const { impl_->assertOwner(); return impl_->held; }
 std::uint64_t Engine::ticks() const { impl_->assertOwner(); return impl_->ticks; }
 std::size_t Engine::traceSize() const { impl_->assertOwner(); return impl_->history.size(); }
 std::size_t Engine::traceCapacity() const { return impl_->capacity; }

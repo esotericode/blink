@@ -29,4 +29,17 @@ std::string instructionNote(std::uint16_t pc, bool teaching) {
     if (pc == demo::write_oam_y) return "Teaching source: copy player_y + 16 into sprite 0's OAM Y byte.";
     return {};
 }
+std::string regionName(std::uint16_t a) {
+    if (a < 0x4000) return "ROM bank 0";
+    if (a < 0x8000) return "ROM bank 1 (fixed: ROM-only cartridge)";
+    if (a < 0xA000) return "VRAM: tile data and maps";
+    if (a < 0xC000) return "Cartridge RAM (absent)";
+    if (a < 0xE000) return "WRAM: work RAM";
+    if (a < 0xFE00) return "Echo of WRAM $C000-$DDFF";
+    if (a < 0xFEA0) return "OAM: sprite records";
+    if (a < 0xFF00) return "Unusable";
+    if (a < 0xFF80) return "IO registers";
+    if (a < 0xFFFF) return "HRAM: high RAM";
+    return "IE: interrupt enable";
+}
 }

@@ -73,13 +73,15 @@ add_custom_command(OUTPUT ${ROM_OUT}/teaching_rom.hpp ${ROM_OUT}/teaching.gb
         --source ${CMAKE_CURRENT_SOURCE_DIR}/rom --output ${ROM_OUT}
     DEPENDS tools/assemble_rom.py rom/teaching.asm rom/boot.asm VERBATIM)
 add_library(observatory_engine src/emulator/engine.cpp src/emulator/disassembly.cpp
-    src/teaching/annotations.cpp ${ROM_OUT}/teaching_rom.hpp)
+    src/emulator/graphics.cpp src/teaching/annotations.cpp src/teaching/lesson.cpp
+    ${ROM_OUT}/teaching_rom.hpp)
 target_include_directories(observatory_engine PUBLIC src ${ROM_OUT})
 target_link_libraries(observatory_engine PRIVATE sameboy)
 target_compile_options(observatory_engine PRIVATE ${observatory_warnings})
 
 if(OBSERVATORY_BUILD_GUI)
-    add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp)
+    add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp
+        src/ui/tile_view.cpp src/ui/activity_map.cpp src/ui/system_diagram.cpp src/ui/style.cpp)
     target_include_directories(observatory_widgets PUBLIC src)
     target_link_libraries(observatory_widgets PUBLIC observatory_engine Qt6::Widgets)
     target_compile_definitions(observatory_widgets PUBLIC OBSERVATORY_VERSION="${PROJECT_VERSION}")
@@ -107,6 +109,13 @@ if(OBSERVATORY_BUILD_GUI)
             qt_generate_deploy_app_script(TARGET console-observatory
                 FILENAME_VARIABLE observatory_deploy NO_UNSUPPORTED_PLATFORM_ERROR)
         endif()
+        # Qt 6.5+ deployment needs an absolute prefix; resolve "--prefix out/install"
+        # the same way CMake installs files: relative to the invoking directory.
+        install(CODE [[
+            if(NOT QT_DEPLOY_PREFIX)
+                get_filename_component(QT_DEPLOY_PREFIX "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+            endif()
+        ]])
         install(SCRIPT ${observatory_deploy})
     endif()
 endif()

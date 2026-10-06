@@ -32,9 +32,9 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Verify widget interactions on the native Windows platform plugin
         run: |
-          New-Item -ItemType Directory -Force out | Out-Null
+          New-Item -ItemType Directory -Force out/stages | Out-Null
           $env:QT_QPA_PLATFORM = 'windows'
-          ./build/widget_tests.exe out/windows-desktop.png out/windows-minimum.png
+          ./build/widget_tests.exe out/windows-desktop.png out/windows-minimum.png out/stages
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Install with windeployqt and package the portable ZIP
         run: |
@@ -64,4 +64,5 @@ jobs:
           path: |
             out/*.zip
             out/*.png
+            out/stages/*.png
           if-no-files-found: warn

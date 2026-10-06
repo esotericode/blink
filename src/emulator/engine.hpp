@@ -20,10 +20,17 @@ public:
     void setTraceEnabled(bool enabled);
     StepResult stepInstruction();
     StepResult stepFrame();
+    // Run atomic steps until one contains a CPU write attempt to `address` (echo
+    // aliases match), then stop at that step's end boundary. Requires capture on.
+    WatchResult runUntilWrite(std::uint16_t address, std::uint64_t limitTicks);
     // Bounded UI quantum; stop at an instruction boundary when time budget ends.
     void advanceTo(std::uint64_t targetTicks, std::chrono::microseconds budget);
     Snapshot snapshot(std::uint16_t memoryBase = 0xC000);
     std::uint8_t inspect(std::uint16_t address) const;
+    // Copies per-address counts since the last clear (load, restart, capture toggle).
+    void activityMap(ActivityMap& out) const;
+    void clearActivityMap();
+    std::uint8_t heldButtons() const;
     std::vector<std::uint8_t> stateBytes() const;
     std::uint64_t ticks() const;
     std::size_t traceSize() const;
