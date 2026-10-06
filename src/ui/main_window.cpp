@@ -114,7 +114,7 @@ QString flagChip(const char* name, bool set) {
 }
 
 MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
-    setWindowTitle("Console Observatory — DMG teaching lab");
+    setWindowTitle("Console Observatory — DMG exploration lab");
     setMinimumSize(980, 680);
     resize(1280, 930);
     if (auto* s = screen()) {
@@ -669,7 +669,7 @@ void MainWindow::loadTeaching() {
     engine_.loadTeaching(); warmTeaching();
     romName_ = "teaching game"; savePath_.clear();
     batteryProblem_.clear(); batteryBlocked_ = false;
-    setWindowTitle("Console Observatory — DMG teaching lab");
+    setWindowTitle("Console Observatory — DMG exploration lab");
     afterLoad(); setMemoryBase(0xC000);
 }
 void MainWindow::loadBankDemo() {

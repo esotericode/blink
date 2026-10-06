@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Console Observatory
-Comment=Follow game movement through CPU instructions, memory, and cartridge banks
+Comment=Explore a Game Boy through linked inspectors and detailed hardware explanations
 Exec=console-observatory %f
 Icon=console-observatory
 Terminal=false

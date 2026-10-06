@@ -275,7 +275,6 @@ const Map& entries() {
             "The stored byte before and after the write. For cartridge controller writes, the effect on the banks instead.",
             {}}},
 
-        // Lesson buttons.
     };
     return map;
 }

@@ -2,7 +2,7 @@
 
 Read `PROJECT_GUIDE.md` before changing the project. If present, read `README.md`, `STATUS.md`, and `DECISIONS.md` to understand the actual implementation. Existing source and verification results determine what works; this starter guide does not establish that any code exists.
 
-A Linux and Windows build with a guided lesson exists. Also read
+A Linux and Windows build with selection-driven learning exists. Also read
 `docs/TRACE_CONTRACT.md` and `docs/VERIFICATION.md`. `DEPENDENCIES.lock.json`
 and SameBoy's `SHA256SUMS` identify the reference inputs. Keep those files
 synchronized with changes.
@@ -54,27 +54,33 @@ Build a standalone native desktop application that connects a running game's beh
 - Run the CTest suites after emulator/observation changes. Run
   `xvfb-run -a ./build/widget_tests` for native X11 UI changes; offscreen tests
   alone do not establish compositor behavior. Inspect rendered layouts:
-  `widget_tests desktop.png minimum.png <dir>` also saves every lesson stage
-  and tab. Check the 980×680 minimum, not only the default size.
+  `widget_tests desktop.png minimum.png <dir>` also saves information
+  topics and inspector tabs. Check the 980×680 minimum, not only the default size.
 - Windows uses MinGW-w64 (Qt's kit); never require MSVC for the core. Keep
   `.gitattributes` (LF) or vendored hashes break on Windows checkouts. Every
   custom widget looked up with `findChild<T>()` needs `Q_OBJECT` (Qt ≥ 6.5).
   Windows CI must stay green, including the packaged launch with only
   System32 on PATH. Use `--screenshot` for headless launch checks.
-- Lesson steps must end on real engine events (`runUntilWrite`, frame step),
-  and lesson text in `src/teaching/lesson.*` may only claim what the widget
-  test asserts. Keep run-until-write's parity test with untraced stepping.
+- The guided tutorials were removed by user direction in 0.6.0. Do not bring
+  back a scripted demo flow as the default learning surface. Detailed general
+  reference lives in `src/teaching/information.*`; selection/facts/history
+  live in `src/ui/information_panel.*`. Clicks and reading are inspection only;
+  keep full-state browsing purity and stable live reading checks passing.
+- Explain concepts/regions thoroughly without inventing unknown game semantics.
+  Short tooltip text still belongs in the glossary. Validate related-topic links,
+  every address's topic, and specific IO/region boundaries. Maps are reconstructed
+  current storage; never label them historical pixel provenance.
 - Vendor files are byte-for-byte upstream. Integration changes belong outside
   `third_party/sameboy`; intentional upstream upgrades require a new pin,
   manifest, callback review, parity results, and updated dependency notices.
-- Implemented: the pause-on-write movement lesson, sprite/tile bit-plane
-  inspector, memory activity map, system overview, loading any
-  SameBoy-supported cartridge with battery `.sav` files, the Cartridge/bank
-  panel, the bank-switching demo and lesson, observed OAM DMA records, and
-  explanatory tooltips. Next: an interrupt and timer lesson and a
-  background-map view. Replay, save states, CGB mode, per-byte DMA tracing,
-  audio playback, and macOS are not implemented; commercial-game
-  compatibility is SameBoy's and not surveyed here.
+- Implemented: selection information and 38 linked articles, sprite/tile
+  bit-plane inspector, background/window maps, memory activity map, system
+  overview, supported ROM loading/battery files, Cartridge/bank panel,
+  playable examples, observed OAM DMA, and explanatory tooltips. Next: an
+  interrupt/timer event inspector and keyboard navigation for painted views.
+  Replay, save states, CGB mode, per-byte DMA tracing, audio playback, and macOS
+  are not implemented; compatibility is SameBoy's and not surveyed here.
+
 
 ## Leave useful continuity
 

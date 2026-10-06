@@ -273,3 +273,36 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   animated sprite tiles, pin manually chosen tiles, reveal linked Memory,
   and label picture age relative to current state. Native widget regressions
   exercise these interactions alongside save failure and recovery.
+
+
+## 2026-10-06 — Selection-driven learning (0.6.0)
+
+- User direction replaces the scripted demo-ROM tutorials with a detailed
+  information surface for the most recent selection. Removed lesson controls,
+  progress pages, forced demo actions, and `lesson.*`. Bundled examples and
+  exact-byte source annotations remain as optional inspection aids.
+- General offline hardware reference is separate from concise tooltips and
+  from observed values. 38 articles explain mechanisms, game uses, and how to
+  interpret available evidence; region explanations do not pretend each RAM
+  byte has a discoverable game meaning. Facts are escaped independently from
+  authored HTML. Only internal topic/address links are accepted by the reader.
+- Use native QTextBrowser for selectable, scrollable text and keyboard reading.
+  History is bounded at 64, topic navigation does not execute the emulator,
+  and live publication refreshes only the facts label. New ROM/reset clears
+  session selection so old evidence is not silently carried over.
+- Added background/window map reconstruction to provide a concrete selection
+  path from a map entry to its resolved pattern and general explanation. Current
+  VRAM, LCDC, and BGP determine it; scroll/composition/raster history is explicitly
+  outside this reconstruction. Reuses the tested signed/unsigned decoding helper.
+- Native tests exercise linked selections, related topics/history, stable reading,
+  input focus, any-ROM behavior, signed map addressing, and full-state browsing
+  purity. The Qt-free reference test validates content/link integrity and all
+  address routes. Existing core, ROM, vendor, save-safety, and tooltip checks remain.
+- Hardware facts were checked against primary Pan Docs sources (`gbdev/pandocs`:
+  Memory_Map, Tile_Data, Tile_Maps, OAM, Rendering, OAM_DMA_Transfer, Interrupts,
+  Timer_and_Divider_Registers, Palettes) and the pinned core/decoder contracts.
+- Release 0.6.0 uses the existing native package pipeline. A new project version
+  with notes merged into main can trigger it as well as a tag/manual invocation.
+  Existing published releases are skipped/refused; draft retries retain source
+  identity. Both platforms must pass, including clean Windows launch, before
+  publication. Linux release checks now include the full Qt-free ASan suite.

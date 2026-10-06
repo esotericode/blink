@@ -1,124 +1,74 @@
 # Status — 2026-10-06
 
-Native desktop teaching lab for Linux x86-64 and Windows x64. C++20 / Qt 6
-Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
-`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.5.0.
+Native desktop Game Boy exploration lab for Linux x86-64 and Windows x64.
+C++20 / Qt 6 Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B,
+`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version **0.6.0**.
 
 ## Works
 
-- Offline launch with the embedded original teaching game visible. Arrow input
-  changes named WRAM position variables, OAM X/Y, and the star's real output.
-- **Guided lesson** "Follow one press of Right": hold Right → stop after the
-  `player_x` store → stop after the OAM X store (outline ahead of the
-  unchanged picture) → next frame with changed pixels marked → the tile's bit
-  planes. Every stop is a real emulator event; text uses the real evidence.
-- **Any Game Boy ROM** (File › Open, drag and drop), up to 8 MiB, with every
-  controller SameBoy emulates. The original boot leaves the documented DMG
-  post-boot state, which real games rely on. CGB-only, SGB, clock, MBC2, and
-  header/file mismatches are explained in the Cartridge panel; MBC6, TAMA5,
-  and unknown types are refused before the current game is touched.
-- **Cartridge · banks** panel: CPU windows linked to the mapped ROM/RAM banks,
-  per-bank opcode shading, an explanation adapted to the controller, MBC
-  register writes with their effect, and **Run until the bank changes**.
-  Memory and CPU panels name the mapped bank and file offset; the captured
-  write list and writer text describe MBC commands instead of ROM "values".
-- **Bank-switching demo**: an original MBC1 cartridge (same address, different
-  bank code) with a two-page lesson that stops at the real switch.
-- **Battery saves**: `.sav` next to the ROM in SameBoy's format, loaded on
-  open, written atomically every ~3 s while dirty, on game change, and on exit.
-  Saving also runs while paused. If saving fails, closing or changing the game
-  asks: save elsewhere, discard, or cancel (never a dead end); persistent
-  Cartridge status offers retry and saving elsewhere. Rejected
-  existing saves are protected from automatic overwrite. Engine validation
-  accepts complete RAM and recognized clock footers without touching the
-  machine on rejection; restart retains unsaved battery state.
-- **OAM DMA observed**: each `$FF46` request is recorded with its instruction
-  and OAM as it was, then OAM is checked against the source once the copy must
-  have finished. OAM bytes show requested DMA sources and later observed values
-  with qualified evidence, linking to the source's current retained CPU attempts; F9 on OAM stops
-  after the copy; the Sprites panel and system overview show it.
-- **Explanatory tooltips** on every control and view, from a Qt-free glossary
-  written for newcomers: registers, flags, each memory byte (region, and what
-  a hardware register does), system-overview parts and arrows, banks, tiles
-  down to bits and pixels, panels (tabs and title bars), buttons and menus.
-  A custom card (title, explanation, hint) replaces Qt's plain tooltip.
-- **Run until written** (F9) for any byte, stopping at the writing step's end.
-- **Sprites and tiles**: OAM records, 128-tile VRAM blocks, and bit-plane rows
-  that combine into colour numbers and palette shades, from copied storage.
-- **Memory map**: per-address CPU write attempts and opcode starts over a
-  labelled interval for all 64 KiB, with a page magnifier and click-through.
-- **System overview**: functional schematic with live values, write counts,
-  lesson path highlighting, and click-through to storage.
-- Run/pause, one-opcode step, next-output frame step; dockable panels with a
-  recoverable default layout; menu bar, About, licenses, About Qt.
-- Shared instruction-boundary snapshots (CPU, memory, VRAM, OAM, video
-  registers), storage disassembly, change highlighting, source-gated names,
-  bounded last-writer evidence, linked selection across panels.
-  RAM writer lookup uses bank and mirrored storage identity. Sprite selection
-  follows animation; manual tiles stay pinned. Links reveal Memory, paused
-  browsing retains activity, and picture age is shown beside current state.
-  External execution/input/capture changes leave guided lessons; restarting a
-  lesson establishes a known frame and checks each expected observation.
-  Long-run pacing splits nanoseconds before multiplication to avoid overflow.
-- Reproducible ROM/symbols/embedding without RGBDS; Linux `.deb` and Windows
-  portable ZIP (windeployqt) packaging; Linux and Windows CI; a Release
-  workflow that builds, verifies, and publishes both packages per version.
-  Published releases: v0.2.0, v0.3.0, v0.4.0, and v0.5.0 (latest).
+- **Selection info replaces the guided tutorials.** The most recent memory,
+  CPU register, flag, sprite, tile, map-cell, system, bank, or captured-write
+  selection opens a detailed general explanation. There are 38 linked topics
+  covering memory and its regions, CPU/register/flag/stack basics, graphics,
+  input, cartridge hardware, interrupts, timers, audio/serial roles, and the
+  observation model. Topics have substantive mechanism, game-use, and
+  inspector-reading sections. Unknown games receive no invented variables.
+- Back/Forward reading history, topic browsing, related links, F1 restoration,
+  selectable text, and a resizable/dockable reader. Live facts share the
+  snapshot boundary; execution preserves the article and scroll position.
+  Reading never advances or replaces the game. New sessions reset history.
+- **Background/window map reconstruction** from copied VRAM and current LCDC/
+  BGP: either active layer or either physical 32×32 map. Clicking a cell follows
+  its map byte and resolved tile, including signed addressing. This is labeled
+  current storage, not a reconstruction of historical pixel inputs.
+- Original star and MBC1 bank-switching examples remain playable. There are
+  no lesson buttons, progress stages, automatically held inputs, or guided
+  lesson engine module. Exact ROM identity still gates source annotations.
+- Any supported Game Boy ROM up to 8 MiB opens via File/drop. Cartridge panel
+  shows effective controller facts, mapping, bank activity, and captured MBC
+  commands. Memory and instruction evidence retain bank identity. Unmapped
+  banks are explainable without forcing a hardware mapping change.
+- Run/pause, one-opcode step, next-output step, run until written/bank change;
+  copied synchronized CPU, memory, VRAM/OAM and register snapshots; bounded
+  captured attempts; memory activity map; functional system diagram.
+- Sprite animation follows current OAM; manual tile selection remains pinned.
+  Tile patterns are decoded into bit planes, colour numbers, and palette shades.
+  OAM DMA is observed as a request and later comparison, with qualified source
+  evidence rather than per-byte provenance. Short explanatory tooltips remain.
+- Battery `.sav` validation, protected rejected saves, atomic writes, paused
+  autosaving, dirty-state preservation across restart, persistent status and
+  retry/save-elsewhere/discard/cancel recovery remain from 0.5.0.
+- Reproducible original ROMs and boot; vendor/dependency pins unchanged.
+  Linux `.deb`, Windows portable ZIP and clean packaged launch; native CI,
+  Qt-free AddressSanitizer checks; release notes in `docs/releases/v0.6.0.md`.
+  A new version merged into main triggers the existing checked release pipeline;
+  previously published versions are skipped.
 
-## Verified
+## Verification
 
-Review fixes at application commit `9d87e47`: Linux CI run 23 passes CTest,
-native X11 interactions, and packaging; Windows CI run 19 passes CTest,
-native Windows widgets, packaging, and the clean packaged launch. Default,
-minimum-size, and lesson screenshots inspected. See `docs/VERIFICATION.md`
-for links and the separate sanitizer check.
-
-
-Linux (Ubuntu 24.04, Qt 6.4.2): five CTest suites pass, including twelve
-engine groups (post-boot state, trace parity with VRAM/OAM/previous output,
-stepping, purity, IRQ/HALT, bounded capture, tile decoding, run-until-write
-and its parity with untraced stepping, activity map, an MBC1 cartridge with
-bank-change stops, banked disassembly, cartridge RAM and battery restore, and
-banked trace parity plus an MBC5 variant and header heuristics, and OAM DMA:
-copy timing checked against SameBoy, OAM equals source, restart, parity), the
-widget suite (both lessons through their buttons, the Cartridge panel, MBC
-writer text, drag-and-drop loading of an MBC5 ROM with an existing `.sav`,
-battery writes, a DMA-written sprite byte followed to its source, and
-tooltips on real controls), and the glossary key check. Widgets also pass
-under X11. Rendered layouts and tooltip cards inspected.
-
-Windows: cross-compiled locally with Ubuntu MinGW-w64 GCC 13 against Qt 6.4.2
-qtbase built from source; the engine suite and the widget suite pass under
-Wine 9.0 (see `docs/VERIFICATION.md` for this version's
-exact Windows results). GitHub Actions (`windows-2025`, official Qt 6.8.3 MinGW
-+ MinGW 13.1) builds, passes all suites and the native-platform widget
-run, packages a 12 MB portable ZIP with windeployqt, and launches the unzipped
-app with only System32 on `PATH`.
+The reference catalogue, complete address routing, glossary keys, and vendored
+hashes pass locally. Native Linux/X11 and Windows CI run the six CTest suites,
+layout renders, package checks, and clean Windows launch. Exact results and
+reviewed screenshot evidence are recorded in `docs/VERIFICATION.md`.
 
 ## Limits
 
-DMG model only (no Game Boy Color mode, no SGB); original boot with the
-documented post-boot state rather than the hardware boot sequence and timing;
-raw IO storage rather than bus readback; operand-storage observations; CPU
-write attempts and opcode starts only, without read or PPU access hooks; OAM
-DMA observed as request plus completion check rather than traced per byte
-(SameBoy has no public DMA hook); cartridge RAM shown as storage regardless of the MBC's RAM enable,
-and clock registers not shown; MMM01 file offsets approximate; no
-per-bank memory map (the `$4000–$7FFF` row combines banks); completed-frame
-display rather than pixel provenance; no replay/rewind, save states, audio
-playback, gate model, or automatic full causality. Commercial-game
-compatibility is SameBoy's and has not been surveyed here. Not yet tested:
-a physical Windows desktop or real high-DPI monitors, Windows
-installer/signing, macOS, external emulator test-ROM suites, clean-machine
-`.deb` installation.
+DMG only; no CGB/SGB mode. Inspection uses copied storage, not synthesized
+CPU bus reads. CPU write callbacks represent attempts before acceptance.
+Activity counts do not include reads, PPU fetches, or DMA byte transfers.
+Tile/map views use current storage and palette; they do not model a historical
+viewport, raster effects, sprite priority, or per-pixel provenance. DMA capture
+is bounded request/comparison evidence. Cartridge RAM enable and selected clock
+register values are not exposed as inferred observations. No replay, save
+states, sound output, audio wave inspector, linked-console session, or macOS
+validation. Physical Windows/high-DPI testing, signing/installer support, and
+clean-machine `.deb` installation remain follow-up validation.
 
 ## Next concrete milestone
 
-The interrupt and timer lesson: VBlank/STAT/timer requests and their service
-on a timeline built from real IF/IE storage and execution events (label what
-is not observed), with tooltips from the same glossary. Then a background-map
-view linking each map entry to its tile. Validate the Windows ZIP on a
-physical Windows 10/11 machine and record the result.
+An interrupt/timer event inspector linked to the existing hardware reference,
+using actual requests and execution evidence. Add keyboard selection to painted
+maps/tiles and validate the Windows package on a physical high-DPI desktop.
 
 Read `PROJECT_GUIDE.md`, `DECISIONS.md`, `AGENTS.md`, and
 `docs/TRACE_CONTRACT.md` before changing observation behavior.

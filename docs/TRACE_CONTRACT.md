@@ -100,7 +100,7 @@ that step's end boundary, so the cursor is the instruction boundary after the
 writing instruction (or after interrupt service that pushed to the byte). It
 returns the first matching record, the opcodes executed, outputs completed,
 and ticks advanced. Without capture it refuses and does not advance. At the
-limit (one emulated second from the UI, two to four frames in the lesson) it
+limit (one emulated second from the UI) it
 stops at the first boundary past the limit. A test proves the full state
 equals untraced instruction stepping by the same number of opcodes.
 
@@ -118,7 +118,7 @@ ROM storage and are not presented as an effect.
 
 `Engine::runUntilBankChange(limit)` repeats atomic steps until one changes the
 mapping, then stops at that step's end boundary (one emulated second from the
-UI, four frames in the bank lesson). It does not require capture. The
+UI). It does not require capture. The
 execution callback attributes each opcode start below `$8000` to the bank
 mapped at its PC (boot-program opcodes are counted separately); the
 instruction record carries that bank, so banked code is disassembled from the
@@ -182,9 +182,9 @@ limit.
 The vblank callback keeps the output it replaces as `previousPixels`, numbered
 `previousFrame` (0 when none since reset). Changed-pixel marks compare those
 two real outputs. Sprite outlines come from OAM at the CPU cursor, which can be
-newer than the picture; that difference is the point of lesson step 3.
+newer than the picture; the display and selection facts label their different times.
 
-`heldButtons` reports the buttons the host is holding (keyboard or lesson),
+`heldButtons` reports the buttons the host is holding (host keyboard),
 not a joypad register read.
 
 ## Activity map
@@ -206,7 +206,9 @@ DMA or PPU fetches, which the CPU hooks do not see.
 | cartridge header facts and MBC register names (no emulation) | `src/emulator/cartridge.*` |
 | pure tile, OAM, and palette decoding of copied storage | `src/emulator/graphics.*` |
 | semantic names, curated source notes, region names | `src/teaching/annotations.*`, generated symbols |
-| guided lesson text from real evidence (button press, bank switch) | `src/teaching/lesson.*` |
+| general hardware reference and address/topic routing | `src/teaching/information.*` |
+| reading history and compact selection facts from copied snapshots | `src/ui/information_panel.*` |
+| reconstructed tile-map storage and selected-cell links | `src/ui/tile_map_view.*`, `tile_view.*` |
 | plain-language explanations shown as tooltips | `src/teaching/glossary.*` |
 | native controls, presentation, wall-clock scheduling, input focus, tooltip card | `src/ui/*` |
 | reproducible original cartridges (teaching, bank demo) and boot | `rom/*`, `tools/assemble_rom.py` |
@@ -215,3 +217,28 @@ DMA or PPU fetches, which the CPU hooks do not see.
 No plugin registry or generalized multi-console platform is needed for this
 slice. Future hooks must specify their source, clock convention, and coverage
 and must preserve tracing-on/off parity before new precision is advertised.
+
+
+## Selection information and tile-map reconstruction (0.6.0)
+
+General articles are authored independently of any cartridge. A memory selection
+chooses its region or recognized hardware-register topic; it does not assign
+unknown game meaning to that byte. Exact bundled-ROM annotations can still name
+known variables in the separate facts/evidence views. Register/flag selections
+add their architecture-specific glossary explanation. Selection facts use the
+same copied snapshot as other inspectors; retained write facts keep their own
+step interval and explicitly report when their record is no longer retained.
+
+Browsing articles, related links, history, tiles, maps, and memory does not call
+execution or replace a ROM. A widget regression compares full core save-state
+bytes before/after reading and selection. Live updates change only the facts
+label; they do not rerender an unchanged article or reset its scroll. History is
+bounded to 64 selections and reset at a new session to avoid old-ROM facts.
+
+Map reconstruction uses copied VRAM, current LCDC, and current BGP. The address
+of a cell is map base + row × 32 + column. `$9800` and `$9C00` each cover 1,024
+entries. Resolving an entry uses the existing pure `backgroundTile` helper,
+including signed addressing; a selected cell links the map byte to its physical
+pattern. This shows the full map, without composing scrolling, window timing,
+sprites, or mid-frame changes. It is not the completed picture or pixel provenance.
+The guided tutorial module and its automatic execution/input controls are removed.

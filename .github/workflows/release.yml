@@ -2,11 +2,13 @@ name: Release
 # Builds the Windows portable ZIP and the Ubuntu 24.04 package from one commit,
 # runs the same checks as CI, and publishes both as a GitHub release whose
 # notes come from docs/releases/<tag>.md (first line "# Title").
-# Push a tag such as v0.5.0 on a commit whose CMakeLists.txt has that version,
-# or run it by hand to release an earlier commit.
+# Merging a new project version and its release notes into main publishes it.
+# Existing versions are skipped. Tags and manual releases remain supported.
 on:
   push:
     tags: ['v*']
+    branches: ['main']
+    paths: ['CMakeLists.txt', 'docs/releases/**', '.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       tag:
@@ -26,7 +28,7 @@ permissions:
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
 env:
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
   REF: ${{ inputs.ref || github.sha }}
   GH_REPO: ${{ github.repository }}
 jobs:
@@ -34,27 +36,58 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ env.REF }}
       - name: Create a draft release with its notes (or refresh an existing one)
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          version="$(python3 -c 'import re; print(re.search(r"project\(ConsoleObservatory VERSION ([0-9]+\.[0-9]+\.[0-9]+) ", open("CMakeLists.txt").read()).group(1))')"
+          automatic=false
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            TAG="v${version}"
+            automatic=true
+          fi
+          if [ "$TAG" != "v${version}" ]; then echo "::error::Tag does not match project version"; exit 1; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$automatic" = true ] && gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != true ]; then
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "Release $TAG already exists; no release files will be changed."
+              exit 0
+            fi
+          fi
           notes="docs/releases/${TAG}.md"
           if [ ! -f "$notes" ]; then echo "::error::Missing $notes"; exit 1; fi
           title="$(head -n 1 "$notes" | sed 's/^# *//')"
           tail -n +2 "$notes" > body.md
           if gh release view "$TAG" > /dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != true ]; then
+              echo "::error::Refusing to replace an already published release"; exit 1
+            fi
+            if [ "$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)" != "$REF" ]; then
+              echo "::error::Draft belongs to another commit; retry that commit's workflow"; exit 1
+            fi
             gh release edit "$TAG" --title "$title" --notes-file body.md
           else
             gh release create "$TAG" --draft --target "$REF" --title "$title" --notes-file body.md
           fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
   linux:
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -76,6 +109,14 @@ jobs:
         run: |
           ctest --test-dir build --output-on-failure
           xvfb-run -a ./build/widget_tests
+      - name: Verify the full Qt-free suite with AddressSanitizer
+        run: |
+          cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DOBSERVATORY_BUILD_GUI=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+          cmake --build build-asan --parallel 2
+          ctest --test-dir build-asan --output-on-failure
       - name: Package and attach the .deb
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,9 +128,12 @@ jobs:
 
   windows:
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: windows-2025
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
     defaults:
       run:
         shell: pwsh
@@ -153,10 +197,13 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   publish:
-    needs: [linux, windows]
+    needs: [prepare, linux, windows]
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - name: Add checksums and publish
         env:

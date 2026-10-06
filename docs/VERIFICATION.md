@@ -3,6 +3,22 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Selection-driven reference and tile maps (0.6.0)
+
+PR #3 replaces the guided tutorial with contextual information. Local GCC
+compilation/checks pass for the 38-article reference, related-topic integrity,
+every address route, and IO/region boundaries. Glossary keys and vendored
+source hashes pass. Native CI checks and layout review are recorded below
+after the final implementation is verified. No local Qt/CMake installation
+was available in this editing workspace; native evidence comes from CI.
+
+Regression coverage: memory/register/flag/sprite/tile/map/system selections,
+reading history and related links, full-state purity after browsing, stable
+article/scroll during execution, reader keyboard focus, arbitrary-ROM behavior,
+new-session reset, and signed tile-map addressing. Existing core/save/bank/DMA
+and native package-launch checks remain. Six CTests now include the standalone
+reference suite; the Qt-free ASan configuration has five.
+
 ## 2026-10-06 — Release 0.5.0
 
 PR #2 merged as `ac848c9` after CI passed on `7f446d9` (Linux with the

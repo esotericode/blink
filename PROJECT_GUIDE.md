@@ -15,17 +15,20 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
 - Any Game Boy ROM the user owns opens (up to 8 MiB, every controller SameBoy
   emulates), with battery `.sav` files. A Cartridge panel shows the CPU's
   windows, every ROM/RAM bank, the live mapping, per-bank activity, MBC
-  register writes with their effect, and a plain-language explanation; a
-  bank lesson stops at a real switch. User ROMs get no invented names.
+  register writes with their effect, and a plain-language explanation; the generic
+  run-until-bank-change command stops at a real switch. User ROMs get no invented names.
 - OAM DMA copies are observed (request, OAM before/after, match against the
   source) so sprite bytes in real games have an honest writer that leads back
   to the shadow table and its CPU writer.
 - Every control and view explains itself in a tooltip card drawn from a
   plain-language glossary (registers, flags, memory regions and hardware
   registers, system parts, banks, tile bits and pixels, panels).
-- Guided lesson "Follow one press of Right": joypad → `player_x` store → OAM X
-  store (outline ahead of the unchanged picture) → next frame with changed
-  pixels → the tile's bit planes. Every stop is a real emulator event.
+- Selection-driven learning replaces guided tutorials (0.6.0): 38 detailed
+  linked general hardware articles, current observed facts, topic browsing,
+  and Back/Forward history. Selection and reading do not advance execution;
+  live updates preserve the article and reading position. Works with any ROM.
+- Background/window map reconstructions link cells to VRAM entries and tile
+  patterns, with unsigned/signed addressing resolved from current LCDC.
 - Run/pause, one-opcode step, next-output frame step, run until a byte is
   written; registers/flags, storage disassembly, memory, VRAM/OAM/video
   register snapshots, changed-value highlighting, bounded write-attempt
@@ -37,16 +40,16 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
   acceptance; physical before/after values confirm the controlled demo.
 - CTest checks full-state trace parity, run-until-write parity with untraced
   stepping, inspection purity, movement through WRAM/OAM to real pixels, tile
-  decoding against source bytes and rendered colours, the whole lesson through
-  its buttons, stepping, interrupt/HALT semantics, bounded growth, ROM
+  decoding against source bytes and rendered colours, selection, reading-history, and arbitrary-ROM explanation
+  checks, stepping, interrupt/HALT semantics, bounded growth, ROM
   reproducibility, and vendored integrity.
 - Ubuntu `.deb` and a Windows portable ZIP (windeployqt) are produced and, on
   Windows CI, launched from a clean folder. A physical Windows desktop,
   installers, signing, and macOS remain unverified.
 
-Next: an interrupt and timer lesson built from real IF/IE storage and
-execution events, and a background-map view linking map entries to tiles. Do not present end-of-frame
-reconstruction as pixel provenance.
+Next: an interrupt/timer event inspector linked to the reference, using real
+IF/IE storage and execution evidence. Keep current-storage map reconstruction
+distinct from historical pixel provenance; add keyboard navigation to painted views.
 
 ## Purpose
 
@@ -54,7 +57,7 @@ Make the connection between a running game and the computer executing it visible
 
 The audience includes curious beginners and people learning programming, emulation, or computer architecture. Provide a clear entry point and progressively deeper inspection. Technical detail should be available without overwhelming the default view.
 
-The eventual ambition includes CPU, memory, graphics, sound, timers, interrupts, input, DMA, and cartridge hardware. Build coherent lessons in stages instead of exposing every component superficially at launch.
+The eventual ambition includes CPU, memory, graphics, sound, timers, interrupts, input, DMA, and cartridge hardware. Provide thorough explanations attached to meaningful selections. Keep general hardware reference distinct from currently implemented observation tools.
 
 ## Commitments and starting choices
 
@@ -70,7 +73,7 @@ The eventual ambition includes CPU, memory, graphics, sound, timers, interrupts,
 | Choice | Initial direction | Reason |
 | --- | --- | --- |
 | Console | Original monochrome Game Boy, DMG-B | Verified model available through SameBoy; memory and display support a coherent explanation. |
-| Emulator | SameBoy 1.0.3 C core; unchanged, vendored commit pin | Existing opcode/write hooks cover the first lesson without emulator patches. |
+| Emulator | SameBoy 1.0.3 C core; unchanged, vendored commit pin | Existing opcode/write hooks support bounded instruction/store evidence without emulator patches. |
 | Application | C++20, Qt 6 Widgets, CMake | Native resizable inspectors and direct C integration; no web wrapper. |
 | Platforms | Ubuntu 24.04 Linux x86-64; Windows x64 with MinGW-w64 | Linux is the reference; Windows builds with Qt's MinGW kit because the core needs GNU C. macOS remains follow-up work. |
 | Demo | Original ROM/boot, assembly source and strict Python subset assembler | Source-defined variables, no proprietary startup ROM, deterministic build without RGBDS. |
@@ -136,7 +139,7 @@ Keep an updated README with exact build/run commands. Record meaningful decision
 
 ## Growth without losing direction
 
-Future possibilities include following a sprite or pixel, tile-bitplane lessons, interrupt and timer timelines, sound-channel exploration, editable values with immediate consequences, trace export, stronger replay, NES support, and selected logic-gate lessons. These are opportunities, not promises or a closed backlog.
+Future possibilities include following a sprite or pixel, deeper tile/pixel inspection, interrupt and timer timelines, sound-channel exploration, editable values with immediate consequences, trace export, stronger replay, NES support, and selected logic-gate lessons. These are opportunities, not promises or a closed backlog.
 
 For a new idea, identify the learning question, the real signal or model that supports it, and the smallest useful experiment. Prefer improvements that connect existing views and preserve playability. Revise a starting choice when an experiment reveals a better option; record the tradeoff. Make routine reversible refinements without a separate approval ritual. Preserve explicit user requirements unless the user changes them.
 

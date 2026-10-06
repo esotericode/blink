@@ -179,11 +179,13 @@ int main(int argc, char** argv) {
         // Signed map addressing is resolved from copied VRAM, not from the
         // map byte as if it were always a physical pattern number.
         auto signedMap = window.displayedSnapshot().video;
-        signedMap.lcdc &= ~0x10; signedMap.vram[0x1C00] = 0xFF;
-        tileMap->setSnapshot(signedMap); tileMap->setMode(3);
-        QTest::mouseClick(tileMap, Qt::LeftButton, Qt::NoModifier, QPoint((tileMap->width() - std::min(tileMap->width()-16, tileMap->height()-16))/2 + 1,
-            (tileMap->height() - std::min(tileMap->width()-16, tileMap->height()-16))/2 + 1));
-        require(tileMap->selectedAddress() == 0x9C00 && tileMap->selectedTile() == 255, "Signed map entry resolved to the wrong pattern");
+        signedMap.lcdc &= ~0x10; signedMap.vram[0x1C00] = 1;
+        TileMapView decodedMap; decodedMap.resize(256,256);
+        decodedMap.setSnapshot(signedMap); decodedMap.setMode(3);
+        QTest::mouseClick(&decodedMap, Qt::LeftButton, Qt::NoModifier, QPoint(9,9));
+        require(decodedMap.selectedAddress() == 0x9C00 && decodedMap.selectedTile() == 257, "Signed map entry resolved to the wrong pattern");
+        signedMap.lcdc |= 0x10; decodedMap.setSnapshot(signedMap);
+        require(decodedMap.selectedTile() == 1, "Unsigned map entry was treated as a signed pattern offset");
         window.refresh(); graphicsTabs->setCurrentIndex(0);
         info->showTopic("memory");
         require(window.engine().stateBytes() == readingState, "Reading, history, or graphics selection mutated emulator state");
