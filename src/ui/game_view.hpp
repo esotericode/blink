@@ -5,6 +5,7 @@
 
 namespace observatory {
 class GameView : public QWidget {
+    Q_OBJECT
 public:
     explicit GameView(QWidget* parent = nullptr);
     void setFrame(const Snapshot& snapshot);
