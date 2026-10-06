@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
-project(ConsoleObservatory VERSION 0.5.0 LANGUAGES C CXX)
+project(ConsoleObservatory VERSION 0.6.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -74,14 +74,14 @@ add_custom_command(OUTPUT ${ROM_OUT}/teaching_rom.hpp ${ROM_OUT}/teaching.gb
         --source ${CMAKE_CURRENT_SOURCE_DIR}/rom --output ${ROM_OUT}
     DEPENDS tools/assemble_rom.py rom/teaching.asm rom/bankdemo.asm rom/boot.asm VERBATIM)
 add_library(observatory_engine src/emulator/engine.cpp src/emulator/disassembly.cpp
-    src/emulator/graphics.cpp src/emulator/cartridge.cpp src/teaching/annotations.cpp src/teaching/lesson.cpp src/teaching/glossary.cpp
+    src/emulator/graphics.cpp src/emulator/cartridge.cpp src/teaching/annotations.cpp src/teaching/information.cpp src/teaching/glossary.cpp
     ${ROM_OUT}/teaching_rom.hpp)
 target_include_directories(observatory_engine PUBLIC src ${ROM_OUT})
 target_link_libraries(observatory_engine PRIVATE sameboy)
 target_compile_options(observatory_engine PRIVATE ${observatory_warnings})
 
 if(OBSERVATORY_BUILD_GUI)
-    add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp
+    add_library(observatory_widgets src/ui/information_panel.cpp src/ui/tile_map_view.cpp src/ui/main_window.cpp src/ui/game_view.cpp
         src/ui/tile_view.cpp src/ui/activity_map.cpp src/ui/system_diagram.cpp src/ui/style.cpp src/ui/cartridge_view.cpp src/ui/tooltip.cpp)
     target_include_directories(observatory_widgets PUBLIC src)
     target_link_libraries(observatory_widgets PUBLIC observatory_engine Qt6::Widgets)
@@ -152,6 +152,9 @@ if(BUILD_TESTING)
     target_link_libraries(engine_tests PRIVATE observatory_engine)
     target_compile_options(engine_tests PRIVATE ${observatory_warnings})
     add_test(NAME engine COMMAND engine_tests)
+    add_executable(information_tests tests/information_tests.cpp)
+    target_link_libraries(information_tests PRIVATE observatory_engine)
+    add_test(NAME information COMMAND information_tests)
     if(OBSERVATORY_BUILD_GUI)
         find_package(Qt6 REQUIRED COMPONENTS Test)
         add_executable(widget_tests tests/widget_tests.cpp)

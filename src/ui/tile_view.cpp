@@ -1,4 +1,6 @@
 #include "ui/tile_view.hpp"
+#include "ui/tile_map_view.hpp"
+#include <QTabWidget>
 #include "ui/style.hpp"
 #include "ui/tooltip.hpp"
 #include "teaching/glossary.hpp"
@@ -305,7 +307,9 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
                       "together they give each pixel a colour number, which a palette register maps to a shade.");
     root->addWidget(caption_);
     auto* split = new QSplitter(Qt::Horizontal);
-    root->addWidget(split, 1);
+    auto* tabs = new QTabWidget; tabs->setObjectName("graphicsTabs");
+    tabs->addTab(split, "Patterns and sprites");
+    root->addWidget(tabs, 1);
     detail_ = new TileDetail;
     split->addWidget(detail_);
     auto* side = new QWidget;
@@ -376,9 +380,28 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     split->setStretchFactor(0, 4); split->setStretchFactor(1, 3);
     split->setSizes({430, 320}); // Room for 10 px bit cells and a 2× tile sheet at the default size.
 
+    auto* mapPage = new QWidget;
+    auto* mapLayout = new QVBoxLayout(mapPage); mapLayout->setContentsMargins(0, 4, 0, 0);
+    auto* mapChoice = new QComboBox; mapChoice->setObjectName("tileMapChoice");
+    mapChoice->addItems({"Background map (LCDC selection)", "Window map (LCDC selection)", "Map at $9800", "Map at $9C00"});
+    mapChoice->setToolTip(tips::key("tiles.maps"));
+    mapLayout->addWidget(mapChoice);
+    maps_ = new TileMapView; mapLayout->addWidget(maps_, 1);
+    mapCaption_ = new QLabel; mapCaption_->setObjectName("tileMapCaption"); mapCaption_->setWordWrap(true);
+    mapLayout->addWidget(mapCaption_);
+    tabs->addTab(mapPage, "Background / window maps");
+    connect(mapChoice, qOverload<int>(&QComboBox::activated), maps_, &TileMapView::setMode);
+    connect(maps_, &TileMapView::cellSelected, this, [this](std::uint16_t address, int tile) {
+        selectTile(tile); mapAddress_ = address; updateViews();
+        emit spriteSelected(-1); emit mapCellSelected(address, tile);
+    });
+    connect(tabs, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 1) emit mapCellSelected(maps_->selectedAddress(), maps_->selectedTile());
+    });
+
     connect(oam_, &QTableWidget::cellClicked, this, [this](int row, int) { selectSprite(row); emit spriteSelected(row); });
     connect(sheet_, &TileSheet::tileClicked, this, [this](int tile) {
-        selectTile(tile); emit spriteSelected(-1);
+        selectTile(tile); emit spriteSelected(-1); emit tileSelected(tile);
     });
     connect(paletteChoice_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { updateViews(); });
     connect(blocks_, &QButtonGroup::idClicked, sheet_, &TileSheet::setBlock);
@@ -436,6 +459,7 @@ void TileInspector::setSnapshot(const Snapshot& snapshot) {
     updateViews();
 }
 void TileInspector::selectSprite(int index) {
+    mapAddress_ = -1;
     sprite_ = index >= 0 && index < spriteCount ? index : -1;
     index = sprite_;
     if (index < 0) { oam_->clearSelection(); updateViews(); return; }
@@ -446,16 +470,22 @@ void TileInspector::selectSprite(int index) {
     updateViews();
 }
 void TileInspector::selectTile(int tile) {
+    mapAddress_ = -1;
     sprite_ = -1; oam_->clearSelection();
     sheet_->setSelected(std::clamp(tile, 0, tileCount - 1));
     updateViews();
 }
 void TileInspector::resetSelection() {
-    sprite_ = -1; haveData_ = false; oam_->clearSelection();
+    sprite_ = -1; mapAddress_ = -1; haveData_ = false; oam_->clearSelection();
     sheet_->setSelected(2); paletteChoice_->setCurrentIndex(0);
+    findChild<QTabWidget*>("graphicsTabs")->setCurrentIndex(0);
 }
 void TileInspector::updateViews() {
     if (!haveData_) return;
+    maps_->setSnapshot(video_);
+    mapCaption_->setText(QString("Map %1 · 32×32 cells · BGP shades · reconstructed at State now. Click a cell for its map entry and pattern. No viewport, sprites, or historical pixel attribution.").arg(q(hex(maps_->base()))));
+    if (mapAddress_ >= 0x9800 && mapAddress_ <= 0x9FFF)
+        sheet_->setSelected(backgroundTile(video_.vram[std::size_t(mapAddress_ - 0x8000)], video_.lcdc & 0x10));
     const int height = video_.lcdc & 0x04 ? 16 : 8;
     if (sprite_ >= 0) {
         const auto selected = sprite(video_.oam, sprite_);

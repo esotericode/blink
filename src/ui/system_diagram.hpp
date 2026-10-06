@@ -22,6 +22,7 @@ public:
     QSize sizeHint() const override { return {640, 170}; }
 signals:
     void blockActivated(observatory::SystemDiagram::Block block);
+    void topicActivated(const QString& topic);
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;

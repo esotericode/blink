@@ -89,6 +89,7 @@ const Sprite* GameView::spriteAt(QPointF p) const {
 void GameView::mousePressEvent(QMouseEvent* event) {
     setFocus();
     if (const auto* s = spriteAt(event->position())) { emit spriteClicked(s->index); return; }
+    if (screenRect().contains(event->position())) emit displayClicked();
     QWidget::mousePressEvent(event);
 }
 bool GameView::event(QEvent* event) {

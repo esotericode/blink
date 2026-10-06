@@ -201,6 +201,13 @@ void BankMap::mousePressEvent(QMouseEvent* event) {
             if (!romCell(l, bank).contains(p)) continue;
             if (bank == cartridge_.banks.rom) emit windowActivated(0x4000);
             else if (bank == cartridge_.banks.rom0) emit windowActivated(0x0000);
+            emit bankSelected(bank, false);
+            return;
+        }
+        for (int bank = 0; bank < ramBanks(); ++bank) {
+            if (!ramCell(l, bank).contains(p)) continue;
+            if (bank == cartridge_.banks.ram) emit windowActivated(0xA000);
+            emit bankSelected(bank, true); return;
         }
     }
 }
@@ -246,8 +253,10 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
     root->setContentsMargins(6, 6, 6, 6);
     facts_ = new QLabel; facts_->setObjectName("cartridgeFacts"); facts_->setWordWrap(true); facts_->setTextFormat(Qt::RichText);
     facts_->setToolTip(tips::key("cart.facts"));
+    facts_->setProperty("informationTopic", "cartridge");
     root->addWidget(facts_);
     notes_ = new QLabel; notes_->setObjectName("cartridgeNotes"); notes_->setWordWrap(true);
+    notes_->setProperty("informationTopic", "cartridge");
     notes_->setStyleSheet(QString("color: %1;").arg(style::write.name()));
     root->addWidget(notes_);
     map_ = new BankMap;
@@ -280,6 +289,10 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
         "The ROM address written and the value. The address range selects which controller register receives it."));
     switches_->horizontalHeaderItem(3)->setToolTip(tips::make("Effect", "What changed in the bank mapping as a result."));
     root->addWidget(switches_, 2);
+    connect(switches_, &QTableWidget::cellClicked, this, [this](int row, int) {
+        auto* item = switches_->item(row, 2); if (!item || !item->data(Qt::UserRole).isValid()) return;
+        emit addressActivated(std::uint16_t(item->data(Qt::UserRole).toUInt()));
+    });
     connect(run_, &QPushButton::clicked, this, &CartridgePanel::runUntilBankChange);
     connect(map_, &BankMap::windowActivated, this, &CartridgePanel::addressActivated);
 }
@@ -352,6 +365,7 @@ void CartridgePanel::setSnapshot(const Snapshot& s, const ActivityMap& activity)
             auto* item = switches_->item(r, col);
             if (!item) { item = new QTableWidgetItem; switches_->setItem(r, col, item); }
             item->setText(values[col]);
+            item->setData(Qt::UserRole, w.address);
             item->setToolTip(col == 2 && !name.empty() ? tips::make(q(name), QString("%1 was written to %2. ROM can't change, so the %3 chip "
                                  "takes the write as a command.").arg(q(hex(w.requested, 2)), q(hex(w.address)), q(mbcName(info.mbc))), values[3])
                                                        : values[col]);

@@ -199,8 +199,19 @@ bool SystemDiagram::event(QEvent* event) {
     return true;
 }
 void SystemDiagram::mousePressEvent(QMouseEvent* event) {
-    for (const auto& [block, box] : layout()) {
+    const auto boxes = layout();
+    for (const auto& [block, box] : boxes) {
         if (box.contains(event->position())) { emit blockActivated(block); return; }
+    }
+    if (dmaArea(boxes).contains(event->position())) { emit topicActivated("dma"); return; }
+    for (const auto& [path, line] : arrows(boxes)) {
+        const auto p = event->position(); const auto d = line.p2() - line.p1();
+        const double t = std::clamp(QPointF::dotProduct(p - line.p1(), d) / std::max(1.0, QPointF::dotProduct(d, d)), 0.0, 1.0);
+        if (QLineF(p, line.p1() + t * d).length() > 7) continue;
+        emit topicActivated(path == Path::JoypadCpu ? "joypad" : path == Path::RomCpu ? "banks" :
+                            path == Path::PpuLcd ? "display" : path == Path::WramOamDma ? "dma" :
+                            (path == Path::CpuOam || path == Path::OamPpu) ? "oam" : path == Path::CpuWram ? "wram" : "vram");
+        return;
     }
 }
 }

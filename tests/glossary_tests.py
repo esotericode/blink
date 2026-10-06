@@ -8,9 +8,9 @@ glossary = (root / 'src/teaching/glossary.cpp').read_text(encoding='utf-8')
 entries = dict(re.findall(r'\{"([a-z]+\.[a-z0-9.\-]+)", \{"([^"]+)"', glossary))
 assert len(entries) > 60, f'glossary unexpectedly small: {len(entries)}'
 
-families = 'panel|action|ui|reg|flag|cpu|part|path|memory|cart|tiles|map|writes|lesson'
+families = 'panel|action|ui|reg|flag|cpu|part|path|memory|cart|tiles|map|writes|info'
 used = set()
-for source in list((root / 'src/ui').glob('*.cpp')) + [root / 'src/teaching/lesson.cpp']:
+for source in list((root / 'src/ui').glob('*.cpp')):
     text = source.read_text(encoding='utf-8')
     used |= {m for m in re.findall(rf'"((?:{families})\.[a-z0-9.\-]+)"', text)}
     # Docks derive their key from the object name: makeDock("Title", "memoryDock") -> "panel.memory".

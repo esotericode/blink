@@ -1,6 +1,5 @@
 #pragma once
 #include "emulator/engine.hpp"
-#include "teaching/lesson.hpp"
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QTimer>
@@ -19,6 +18,7 @@ namespace observatory {
 class ActivityPanel;
 class CartridgePanel;
 class GameView;
+class InformationPanel;
 class SystemDiagram;
 class TileInspector;
 
@@ -50,10 +50,6 @@ public:
     void selectAddress(std::uint16_t address);
     std::uint16_t selectedAddress() const { return selectedAddress_; }
     const Engine& engine() const { return engine_; }
-    // Guided lesson: perform the current step's action, or stop and release input.
-    void advanceLesson();
-    void stopLesson();
-    LessonStep lessonStep() const { return lessonStep_; }
     void resetLayout();
 protected:
     bool eventFilter(QObject* object, QEvent* event) override;
@@ -78,14 +74,11 @@ private:
     bool preserveBattery(const QString& action);
     void updateBatteryStatus();
     void afterLoad();
-    LessonStep idleLessonStep() const;
     QString romLabel(std::uint16_t address) const;
     void updateWriter();
     void updateSelection();
     void updatePanels(bool force);
-    void inspectMovement();
-    void leaveLesson();
-    void setLessonStep(LessonStep step, const LessonEvidence& evidence = {}, const QString& problem = {});
+    void showInformation(const std::string& topic);
     void showLicenses();
     bool ownsKeyboard(QWidget* widget) const;
     Engine engine_;
@@ -95,9 +88,6 @@ private:
     bool running_{}, laidOut_{};
     std::uint16_t memoryBase_ = 0xC000, selectedAddress_ = 0xC000;
     std::optional<std::uint64_t> selectedEvent_;
-    LessonStep lessonStep_ = LessonStep::Start;
-    std::uint8_t lessonStartX_{};
-    std::uint64_t lessonStartFrame_{};
     QTimer timer_;
     QElapsedTimer wall_, published_;
     std::uint64_t runStartTick_{};
@@ -110,16 +100,16 @@ private:
     bool batteryBlocked_{};
     QTimer batteryTimer_;
     GameView* game_{};
+    InformationPanel* information_{};
     SystemDiagram* diagram_{};
     TileInspector* tiles_{};
     ActivityPanel* map_{};
     CartridgePanel* cartridge_{};
-    QDockWidget *systemDock_{}, *cpuDock_{}, *memoryDock_{}, *cartridgeDock_{}, *tilesDock_{}, *mapDock_{}, *writesDock_{}, *lessonDock_{};
+    QDockWidget *systemDock_{}, *cpuDock_{}, *memoryDock_{}, *cartridgeDock_{}, *tilesDock_{}, *mapDock_{}, *writesDock_{}, *informationDock_{};
     QLabel *badge_{}, *cursor_{}, *frameLabel_{}, *instruction_{}, *flags_{}, *writer_{}, *selection_{}, *window_{};
     std::array<QLabel*, 4> flagChips_{};
-    QLabel *activityLabel_{}, *traceStatus_{}, *lessonProgress_{}, *lessonHeading_{}, *lessonBody_{};
+    QLabel *activityLabel_{}, *traceStatus_{};
     QLabel* batteryStatus_{};
-    QPushButton *lessonAction_{}, *lessonStop_{}, *lessonFollow_{};
     QTableWidget *registers_{}, *memory_{}, *writes_{};
     QComboBox* region_{};
     QLineEdit* address_{};

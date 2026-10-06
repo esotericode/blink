@@ -1,6 +1,8 @@
 #include "ui/activity_map.hpp"
 #include "ui/cartridge_view.hpp"
 #include "ui/game_view.hpp"
+#include "ui/information_panel.hpp"
+#include "ui/tile_map_view.hpp"
 #include "ui/main_window.hpp"
 #include "ui/system_diagram.hpp"
 #include "ui/tile_view.hpp"
@@ -20,6 +22,10 @@
 #include <QPushButton>
 #include <QStandardPaths>
 #include <QTableWidget>
+#include <QTextBrowser>
+#include <QScrollBar>
+#include <QComboBox>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QScreen>
@@ -40,7 +46,7 @@ int main(int argc, char** argv) {
     QStandardPaths::setTestModeEnabled(true);
     QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/bankdemo.sav");
     MainWindow window; window.show(); QTest::qWait(50);
-    // Optional third argument: a directory for screenshots of each lesson step and inspector tab.
+    // Optional third argument: a directory for screenshots of contextual information and inspector tabs.
     const QString shots = argc > 3 ? QString::fromLocal8Bit(argv[3]) : QString();
     auto shot = [&](const QString& name) {
         if (shots.isEmpty()) return;
@@ -94,7 +100,7 @@ int main(int argc, char** argv) {
         game->setFocus(); QTest::keyPress(game,Qt::Key_Right);
         QEvent deactivate(QEvent::WindowDeactivate); QApplication::sendEvent(&window,&deactivate);
         frame->trigger(); frame->trigger(); require(window.displayedSnapshot().playerX==paused.playerX,"Focus loss left a stuck game button");
-        window.findChild<QPushButton*>("inspectMovementButton")->click();
+        window.selectAddress(demo::player_x);
         require(window.selectedAddress()==0xC000,"Movement shortcut did not select player_x");
 
         // Break on write for any byte: frame_counter is stored once per game update.
@@ -103,50 +109,95 @@ int main(int argc, char** argv) {
         require(watch.stop==WatchResult::Stop::Write && watch.write->requested==std::uint8_t(counter+1),"Run until written missed frame_counter");
         require(window.displayedSnapshot().memory[3]==std::uint8_t(counter+1) && window.selectedAddress()==demo::frame_counter,"Run until written left inspectors stale");
 
-        // Guided lesson through its real button: every stop is a real emulator event.
+        // Selection-driven learning: browsing observes without executing or
+        // changing the core, and explanations are independent of ROM identity.
         window.loadTeaching();
         window.resize(1280,930); window.resetLayout(); QTest::qWait(30);
-        auto* action=window.findChild<QPushButton*>("primaryAction");
-        auto* body=window.findChild<QLabel*>("lessonBody");
-        auto* diagram=window.findChild<SystemDiagram*>("systemDiagram");
-        auto* tiles=window.findChild<TileInspector*>("tileInspector");
-        auto* tilesDock=window.findChild<QDockWidget*>("tilesDock");
-        require(action && body && diagram && tiles && tilesDock,"Lesson controls absent");
-        require(window.lessonStep()==LessonStep::Start && action->text().contains("Hold Right"),"Lesson did not start ready");
-        shot("lesson-0-start.png");
-        const auto start=window.displayedSnapshot();
-        action->click();
-        require(window.lessonStep()==LessonStep::Holding && window.displayedSnapshot().heldButtons==1 && window.displayedSnapshot().ticks==start.ticks,
-                "Hold step should hold Right without running");
-        require(diagram->highlightedPaths().count(SystemDiagram::Path::JoypadCpu)==1,"Diagram does not show the joypad path");
-        shot("lesson-1-joypad.png");
-        action->click();
-        const auto stored=window.displayedSnapshot();
-        require(window.lessonStep()==LessonStep::Stored && stored.playerX==start.playerX+1,"Lesson did not stop at the player_x store");
-        require(stored.registers.pc==demo::write_player_x_right+3 && window.selectedAddress()==demo::player_x,"Lesson cursor/selection wrong after store");
-        require(stored.frames==start.frames && stored.pixels==start.pixels,"Picture changed before the store's frame (lesson text would be wrong)");
-        require(body->text().contains("LD [$C000], A") && writer->text().contains("LD [$C000], A"),"Lesson/writer text lacks the real instruction");
-        require(diagram->highlightedPaths().count(SystemDiagram::Path::CpuWram)==1,"Diagram does not show the CPU→WRAM path");
-        shot("lesson-2-wram.png");
-        action->click();
-        const auto copied=window.displayedSnapshot();
-        require(window.lessonStep()==LessonStep::Copied && copied.video.oam[1]==copied.playerX+8 && copied.frames==stored.frames,"Lesson did not stop at the OAM X store");
-        require(game->showSprites() && game->selectedSprite()==0 && body->text().contains("LD [$FE01], A"),"OAM step overlay/text wrong");
-        shot("lesson-3-oam.png");
-        action->click();
-        const auto drawn=window.displayedSnapshot();
-        require(window.lessonStep()==LessonStep::Drawn && drawn.frames==copied.frames+1 && drawn.previousFrame==copied.frames,"Lesson frame step wrong");
-        require(game->showChanges() && game->changedPixels()>0 && game->changedPixels()<64,"Changed-pixel overlay does not show the star's move");
-        require(body->text().contains(QString("%1 pixels").arg(game->changedPixels())),"Lesson text does not report the measured change");
-        shot("lesson-4-frame.png");
-        action->click();
-        require(window.lessonStep()==LessonStep::Tile && !tilesDock->visibleRegion().isEmpty() && tiles->selectedSprite()==0 && tiles->selectedTile()==2,
-                "Tile step did not show sprite 0's tile");
-        auto* oam=window.findChild<QTableWidget*>("oamTable");
-        require(oam && oam->item(0,2)->text()==QString::number(window.displayedSnapshot().video.oam[1]) && oam->item(0,3)->text()=="2","OAM table stale");
-        shot("lesson-5-tile.png");
-        action->click();
-        require(window.lessonStep()==LessonStep::Done && window.displayedSnapshot().heldButtons==0,"Lesson did not finish and release Right");
+        auto* info = window.findChild<InformationPanel*>("informationPanel");
+        auto* body = window.findChild<QTextBrowser*>("informationBody");
+        auto* infoFacts = window.findChild<QLabel*>("informationFacts");
+        auto* infoDock = window.findChild<QDockWidget*>("informationDock");
+        auto* diagram = window.findChild<SystemDiagram*>("systemDiagram");
+        auto* tiles = window.findChild<TileInspector*>("tileInspector");
+        auto* tilesDock = window.findChild<QDockWidget*>("tilesDock");
+        auto* graphicsTabs = window.findChild<QTabWidget*>("graphicsTabs");
+        require(info && body && infoFacts && infoDock && diagram && tiles && tilesDock && graphicsTabs, "Information/graphics controls absent");
+        require(!window.findChild<QPushButton*>("primaryAction") && !window.findChild<QDockWidget*>("lessonDock") &&
+                !window.findChild<QAction*>("lessonMenuAction"), "Tutorial controls remain in the application");
+        require(info->selection().topic == "explore" && window.findChild<QComboBox*>("informationTopics")->count() >= 35,
+                "The reference has no usable entry point");
+        shot("info-0-explore.png");
+        const auto readingState = window.engine().stateBytes();
+        window.selectAddress(0xC000);
+        require(info->selection().topic == "wram" && body->toPlainText().contains("Work RAM") &&
+                body->toPlainText().contains("How it works") && body->toPlainText().contains("Reading this inspector") &&
+                body->toPlainText().size() > 1200 && infoFacts->text().contains("$C000"), "WRAM selection lacks a detailed explanation");
+        shot("info-1-memory.png");
+        emit body->anchorClicked(QUrl("topic:memory"));
+        require(info->selection().topic == "memory" && body->toPlainText().contains("$FEA0") && body->toPlainText().contains("little-endian"),
+                "Related memory reference is incomplete");
+        window.findChild<QPushButton*>("informationBack")->click();
+        require(info->selection().topic == "wram" && info->selection().address == 0xC000, "Reading history lost the selected address");
+        window.findChild<QPushButton*>("informationForward")->click();
+        require(info->selection().topic == "memory", "Forward reading history failed");
+        window.selectAddress(0xFF46);
+        require(info->selection().topic == "dma" && body->toPlainText().contains("160 bytes") && body->toPlainText().contains("not proof"),
+                "DMA register did not open an honest hardware explanation");
+        QTest::mouseClick(regs->viewport(), Qt::LeftButton, Qt::NoModifier, regs->visualItemRect(regs->item(0,5)).center());
+        require(info->selection().kind == InformationKind::Register && info->selection().topic == "instructions" && infoFacts->text().contains("PC ="),
+                "Register click did not become the newest selection");
+        auto* flag = window.findChild<QLabel*>("flagZ");
+        QTest::mouseClick(flag, Qt::LeftButton);
+        require(info->selection().kind == InformationKind::Flag && body->toPlainText().contains("Z · zero flag"), "Flag click lost its explanation");
+        emit diagram->blockActivated(SystemDiagram::Block::Ppu);
+        require(info->selection().topic == "ppu" && body->toPlainText().contains("154 scanlines"), "System part did not open its hardware article");
+        shot("info-2-ppu.png");
+        tilesDock->raise(); QTest::qWait(20);
+        auto* oam = window.findChild<QTableWidget*>("oamTable");
+        QTest::mouseClick(oam->viewport(), Qt::LeftButton, Qt::NoModifier, oam->visualItemRect(oam->item(0,3)).center());
+        require(info->selection().kind == InformationKind::Sprite && infoFacts->text().contains("sprite 0") &&
+                tiles->selectedSprite() == 0 && game->selectedSprite() == 0 && body->toPlainText().contains("ten sprites"),
+                "Sprite selection lacks linked observed facts and explanation");
+        shot("info-3-sprite.png");
+        auto* sheet = window.findChild<TileSheet*>("tileSheet");
+        require(sheet, "Tile sheet missing");
+        QTest::mouseClick(sheet, Qt::LeftButton, Qt::NoModifier, sheet->rect().center());
+        require(info->selection().kind == InformationKind::Tile && info->selection().index == tiles->selectedTile() &&
+                tiles->selectedSprite() == -1 && body->toPlainText().contains("high × 2 + low"), "Tile click did not explain the bit planes");
+        shot("info-4-tile.png");
+        graphicsTabs->setCurrentIndex(1); QTest::qWait(20);
+        auto* tileMap = window.findChild<TileMapView*>("tileMapView");
+        auto* mapChoice = window.findChild<QComboBox*>("tileMapChoice");
+        require(tileMap && mapChoice, "Background/window map view missing");
+        mapChoice->setCurrentIndex(3); emit mapChoice->activated(3);
+        QTest::mouseClick(tileMap, Qt::LeftButton, Qt::NoModifier, tileMap->rect().center());
+        require(info->selection().kind == InformationKind::MapCell && info->selection().address == tileMap->selectedAddress() &&
+                tileMap->base() == 0x9C00 && tiles->selectedTile() == tileMap->selectedTile() &&
+                infoFacts->text().contains("$9C00") && body->toPlainText().contains("map base + y × 32 + x"),
+                "Map cell is not linked to its source byte, pattern, and general explanation");
+        shot("info-5-tile-map.png");
+        // Signed map addressing is resolved from copied VRAM, not from the
+        // map byte as if it were always a physical pattern number.
+        auto signedMap = window.displayedSnapshot().video;
+        signedMap.lcdc &= ~0x10; signedMap.vram[0x1C00] = 0xFF;
+        tileMap->setSnapshot(signedMap); tileMap->setMode(3);
+        QTest::mouseClick(tileMap, Qt::LeftButton, Qt::NoModifier, QPoint((tileMap->width() - std::min(tileMap->width()-16, tileMap->height()-16))/2 + 1,
+            (tileMap->height() - std::min(tileMap->width()-16, tileMap->height()-16))/2 + 1));
+        require(tileMap->selectedAddress() == 0x9C00 && tileMap->selectedTile() == 255, "Signed map entry resolved to the wrong pattern");
+        window.refresh(); graphicsTabs->setCurrentIndex(0);
+        info->showTopic("memory");
+        require(window.engine().stateBytes() == readingState, "Reading, history, or graphics selection mutated emulator state");
+        body->setFocus(); QTest::keyClick(body, Qt::Key_Right); window.refresh();
+        require(window.displayedSnapshot().heldButtons == 0, "Reading navigation pressed a game button");
+        QTest::qWait(20); body->verticalScrollBar()->setValue(body->verticalScrollBar()->maximum()/2);
+        const auto scrollPosition = body->verticalScrollBar()->value();
+        window.instructionStep();
+        require(info->selection().topic == "memory" && body->verticalScrollBar()->value() == scrollPosition,
+                "Executing reset the topic or reading position");
+        window.frameStep(); window.run(); QTest::qWait(40); window.pause();
+        require(info->selection().topic == "memory", "Execution controls replaced contextual information");
+        infoDock->hide(); window.findChild<QAction*>("informationMenuAction")->trigger();
+        require(infoDock->isVisible() && info->selection().topic == "memory", "F1 did not restore the selected information");
 
         // Memory map: real counts over a labelled interval, cleared on request.
         auto* mapDock=window.findChild<QDockWidget*>("mapDock");
@@ -163,14 +214,17 @@ int main(int argc, char** argv) {
         window.findChild<QDockWidget*>("writesDock")->raise(); QTest::qWait(20);
         shot("tab-captured-writes.png");
 
-        // Another ROM: hardware views remain, game names and the lesson do not.
+        // Another ROM keeps the full general reference without inventing game symbols.
         QTemporaryDir dir; auto modified=demo::rom; modified[0x3000]=1;
         const auto path=dir.filePath("other.gb");
         { QFile f(path); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(modified.data()),modified.size())==qint64(modified.size()),"Fixture write failed"); }
         window.loadFile(path);
-        require(!window.displayedSnapshot().teaching && window.lessonStep()==LessonStep::NeedsTeachingRom && action->text().contains("teaching game"),"Unannotated ROM lesson state wrong");
-        action->click();
-        require(window.displayedSnapshot().teaching && window.lessonStep()==LessonStep::Start,"Lesson could not reload the teaching ROM");
+        require(!window.displayedSnapshot().teaching && info->selection().topic == "explore", "New ROM retained stale selection facts");
+        const auto otherState = window.engine().stateBytes(); window.selectAddress(0xC000);
+        require(info->selection().topic == "wram" && !infoFacts->text().contains("player_x") &&
+                !body->toPlainText().contains("load the teaching"), "General reference invented arbitrary-ROM semantics");
+        require(window.engine().stateBytes() == otherState, "General information replaced or advanced a user ROM");
+        window.loadTeaching();
 
         // Cartridge panel for the teaching ROM: no MBC, so nothing switches.
         auto* cartridgeDock=window.findChild<QDockWidget*>("cartridgeDock");
@@ -186,22 +240,21 @@ int main(int argc, char** argv) {
         require(facts->text().contains("ROM ONLY") && explanation->text().contains("no memory bank controller") && !bankButton->isEnabled(),"No-MBC cartridge description wrong");
         shot("tab-cartridge-teaching.png");
 
-        // Bundled MBC1 demo: the lesson presses A and stops at the real bank switch.
+        // Bundled MBC1 demo remains an ordinary playable example; explicit input drives real switches.
         window.loadBankDemo();
         const auto demoStart=window.displayedSnapshot();
-        require(demoStart.bankDemo && demoStart.cartridge.banks.rom==1 && window.lessonStep()==LessonStep::BankDemo,"Bank demo did not start ready");
+        require(demoStart.bankDemo && demoStart.cartridge.banks.rom==1,"Bank demo did not start ready");
         require(!cartridgeDock->visibleRegion().isEmpty() && facts->text().contains("MBC1+RAM+BATTERY") && bankButton->isEnabled(),"Bank demo cartridge panel wrong");
         require(windowLabel->isVisible() && windowLabel->text().contains("ROM bank 1") && memory->item(0,1)->text().startsWith(QString::fromStdString(hex(bankdemo::rom[0x4000],2)).mid(1)),
                 "Switchable window does not show bank 1 storage");
         shot("bank-0-start.png");
-        action->click();
+        game->setFocus(); QTest::keyPress(game,Qt::Key_Z);
+        window.runUntilBankChange(); QTest::keyRelease(game,Qt::Key_Z);
         auto switched=window.displayedSnapshot();
-        require(window.lessonStep()==LessonStep::BankSwitched && switched.cartridge.banks.rom==2 && switched.next.pc==bankdemo::call_bank,"Bank lesson did not stop after the switch");
-        require(body->text().contains("LD [$2000], A") && body->text().contains("<b>1</b> to <b>2</b>"),"Bank lesson text lacks real evidence");
+        require(switched.cartridge.banks.rom==2 && switched.next.pc==bankdemo::call_bank,"Explicit input/watch did not stop after the switch");
         require(switches->rowCount()>0 && switches->item(0,2)->text().startsWith("$2000 ← $02") && switches->item(0,3)->text()=="ROM bank 1 → 2","Bank switch list wrong");
         require(windowLabel->text().contains("ROM bank 2") && memory->item(0,1)->text().startsWith(QString::fromStdString(hex(bankdemo::rom[2*0x4000],2)).mid(1)),
                 "Memory panel did not follow the bank switch");
-        require(diagram->highlightedPaths().count(SystemDiagram::Path::RomCpu)==1,"Diagram does not show the cartridge path");
         shot("bank-1-switched.png");
         instruction->trigger();
         require(window.displayedSnapshot().next.pc==0x4000 && window.displayedSnapshot().next.bank==2 && cpuText->text().contains("$4000 bank 2"),
@@ -209,7 +262,8 @@ int main(int argc, char** argv) {
         // Writer evidence for an MBC write names the register and its effect.
         window.selectAddress(0x2000);
         require(writer->text().contains("command") && writer->text().contains("ROM bank 1 → 2"),"MBC writer text wrong");
-        action->click();
+        window.frameStep(); window.frameStep();
+        game->setFocus(); QTest::keyPress(game,Qt::Key_Z); window.runUntilBankChange(); QTest::keyRelease(game,Qt::Key_Z);
         require(window.displayedSnapshot().cartridge.banks.rom==3,"Second press did not select bank 3");
         // The panel's own button: without a new press, nothing switches within the limit.
         auto none=window.runUntilBankChange();
@@ -233,7 +287,7 @@ int main(int argc, char** argv) {
         QDropEvent drop(QPointF(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
         QApplication::sendEvent(&window,&drop);
         auto opened=window.displayedSnapshot();
-        require(opened.cartridge.info.mbc==Mbc::Mbc5 && !opened.bankDemo && window.lessonStep()==LessonStep::NeedsTeachingRom && opened.instructions==0,"Dropped ROM not loaded paused at power-on");
+        require(opened.cartridge.info.mbc==Mbc::Mbc5 && !opened.bankDemo && opened.instructions==0,"Dropped ROM not loaded paused at power-on");
         require(window.engine().inspect(bankdemo::saved_count)==7 && window.batteryPath()==dir.filePath("mbc5 demo.sav"),"Existing .sav not loaded");
         require(!regs->item(0,5)->text().contains("Δ"),"A new game's registers were compared with the previous game");
         require(facts->text().contains("MBC5") && facts->text().contains("8 banks") && windowLabel->isVisible()==false,"MBC5 facts wrong");
@@ -317,27 +371,6 @@ int main(int argc, char** argv) {
         tips::hide();
         require(!tips::current(),"Tooltip did not hide");
 
-        // Each external execution control leaves old lesson explanations behind.
-        for (int stage = 1; stage <= 5; ++stage) {
-            window.loadTeaching();
-            for (int step = 0; step < stage; ++step) window.advanceLesson();
-            window.instructionStep();
-            require(window.lessonStep() == LessonStep::FreeExploration && window.displayedSnapshot().heldButtons == 0 &&
-                    body->text().contains("earlier lesson stop") && diagram->highlightedPaths().empty(), "Manual step left stale lesson evidence");
-            window.advanceLesson(); window.advanceLesson();
-            require(window.lessonStep() == LessonStep::Stored && window.displayedSnapshot().playerX == 73 &&
-                    body->text().contains("copy A = 73"), "Restarted lesson did not establish fresh evidence");
-        }
-        window.frameStep(); require(window.lessonStep() == LessonStep::FreeExploration, "Manual frame retained lesson");
-        window.advanceLesson(); window.advanceLesson(); window.runUntilWritten(demo::frame_counter);
-        require(window.lessonStep() == LessonStep::FreeExploration, "Watch action retained lesson");
-        window.advanceLesson(); window.advanceLesson(); window.run(); window.pause();
-        require(window.lessonStep() == LessonStep::FreeExploration, "Run retained lesson");
-        window.advanceLesson(); window.advanceLesson();
-        window.findChild<QAction*>("traceAction")->trigger();
-        require(window.lessonStep() == LessonStep::FreeExploration, "Capture change retained lesson");
-        window.findChild<QAction*>("traceAction")->trigger();
-
         // Sprite animation follows OAM; manually choosing a tile pins it.
         auto animated = window.displayedSnapshot();
         tiles->setSnapshot(animated); tiles->selectSprite(0);
@@ -416,25 +449,23 @@ int main(int argc, char** argv) {
         require(!window.running() && !window.engine().batteryDirty(), "Paused stepping was not autosaved");
         autosave->setInterval(3000); window.loadTeaching();
 
-        // Screenshots for documentation: mid-lesson, where the outline leads the picture.
+        // Render the reader at default/minimum sizes and its tile-map topic.
         if (argc>1) {
-            window.resize(1280,930); window.resetLayout(); QTest::qWait(30);
-            action->click(); action->click(); action->click();
-            require(window.lessonStep()==LessonStep::Copied,"Screenshot lesson state wrong");
-            QTest::qWait(30);
+            window.loadTeaching(); window.resize(1280,930); window.resetLayout(); QTest::qWait(30);
+            window.selectAddress(0xC000); QTest::qWait(30);
             require(window.grab().save(QString::fromLocal8Bit(argv[1])),"Screenshot could not be saved");
-            window.stopLesson();
         }
         if (argc>2) {
             window.resize(window.minimumSize()); window.resetLayout(); QTest::qWait(30);
             require(window.grab().save(QString::fromLocal8Bit(argv[2])),"Minimum-size screenshot could not be saved");
-            window.loadBankDemo();
-            shot("minimum-cartridge.png");
+            tilesDock->raise(); graphicsTabs->setCurrentIndex(1); QTest::qWait(30);
+            shot("minimum-tile-map.png");
+            window.loadBankDemo(); shot("minimum-cartridge.png");
         }
         std::cout << "PASS Qt " << qVersion() << " / " << qPrintable(QGuiApplication::platformName())
                   << ": native widgets, input/focus, run/pause, instruction/frame, run-until-written, synchronized inspectors, writer selection, "
-                     "guided lesson (hold → WRAM store → OAM store → frame → tile), tile/OAM/activity panels, cartridge/bank panel, "
-                     "bank-switch lesson, MBC writer text, any-ROM drop loading, battery .sav load/save, OAM DMA as writer, explanatory tooltips; UI heartbeats=" << heartbeats << "\n";
+                     "selection-driven information, related topics/history, inspection purity, stable reading, tile/map/OAM/activity panels, cartridge/bank panel, "
+                     "manual bank switching, MBC writer text, any-ROM drop loading, battery .sav load/save, OAM DMA as writer, explanatory tooltips; UI heartbeats=" << heartbeats << "\n";
     } catch(const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }
