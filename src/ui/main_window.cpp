@@ -4,6 +4,8 @@
 #include "ui/activity_map.hpp"
 #include "ui/cartridge_view.hpp"
 #include "ui/game_view.hpp"
+#include "ui/information_panel.hpp"
+#include "teaching/information.hpp"
 #include "ui/style.hpp"
 #include "ui/system_diagram.hpp"
 #include "ui/tile_view.hpp"
@@ -38,6 +40,7 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTableWidget>
+#include <QTextBrowser>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
@@ -111,7 +114,7 @@ QString flagChip(const char* name, bool set) {
 }
 
 MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
-    setWindowTitle("Console Observatory — DMG teaching lab");
+    setWindowTitle("Console Observatory — DMG exploration lab");
     setMinimumSize(980, 680);
     resize(1280, 930);
     if (auto* s = screen()) {
@@ -134,7 +137,6 @@ MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
     warmTeaching();
     romName_ = "teaching game";
     refresh();
-    setLessonStep(LessonStep::Start);
     batteryTimer_.setParent(this); batteryTimer_.setObjectName("batteryAutosaveTimer");
     batteryTimer_.setInterval(3000);
     connect(&batteryTimer_, &QTimer::timeout, this, [this] {
@@ -146,7 +148,7 @@ MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
     timer_.setTimerType(Qt::PreciseTimer);
     qApp->installEventFilter(this);
     statusBar()->showMessage("Paused. F5 runs; arrows move the star (Z/X = A/B, Enter/Backspace = Start/Select). "
-                             "Follow the lesson below, or open any Game Boy ROM (Ctrl+O or drop a file).");
+                             "Click an item for detailed information below, or open a Game Boy ROM (Ctrl+O or drop a file).");
     game_->setFocus();
 }
 
@@ -169,7 +171,7 @@ void MainWindow::buildActions() {
     auto* restartAction = action("Restart", "restartAction", QKeySequence("Ctrl+R"), [this] { restart(); });
     restartAction->setToolTip(tips::key("action.restart"));
     traceAction_ = action("Capture writes", "traceAction", {}, [this](bool on) {
-        leaveLesson();
+       
         engine_.setTraceEnabled(on); selectedEvent_.reset(); refresh();
     });
     traceAction_->setCheckable(true);
@@ -187,7 +189,7 @@ void MainWindow::buildActions() {
         if (!file.isEmpty()) loadFile(file);
     });
     open->setToolTip(tips::key("action.open"));
-    auto* teaching = action("Teaching game (button press lesson)", "teachingAction", {}, [this] { loadTeaching(); });
+    auto* teaching = action("Star example (arrow-key input)", "teachingAction", {}, [this] { loadTeaching(); });
     auto* bankDemo = action("Bank-switching demo (MBC1)", "bankDemoAction", {}, [this] { loadBankDemo(); });
     teaching->setToolTip(tips::key("action.teaching"));
     bankDemo->setToolTip(tips::key("action.bankdemo"));
@@ -218,17 +220,17 @@ void MainWindow::buildActions() {
     emulation->actions().back()->setToolTip(tips::key("action.clearmap"));
     viewMenu_ = menuBar()->addMenu("&View");
     auto* help = menuBar()->addMenu("&Help");
-    help->addAction(action("Lesson: follow one press of Right", "lessonMenuAction", Qt::Key_F1, [this] {
-        stopLesson(); lessonDock_->show(); lessonDock_->raise();
+    help->addAction(action("Selection info", "informationMenuAction", Qt::Key_F1, [this] {
+        informationDock_->show(); informationDock_->raise();
     }));
     help->addSeparator();
     help->addAction(action("About Console Observatory", "aboutAction", {}, [this] {
         QMessageBox::about(this, "About Console Observatory", QString(
-            "<h3>Console Observatory %1</h3><p>A native Game Boy (DMG) teaching lab: follow a button press through CPU "
-            "instructions, memory, cartridge banks, and the picture on screen.</p>"
+            "<h3>Console Observatory %1</h3><p>A native Game Boy (DMG) exploration lab: select CPU state, memory, "
+            "graphics, or cartridge hardware to inspect real values and read detailed explanations.</p>"
             "<p>Emulation: SameBoy 1.0.3 core, unmodified (Expat/MIT).<br>Interface: Qt %2 Widgets (LGPLv3), dynamically linked.<br>"
             "Application, bundled example ROMs, and boot program: MIT.</p>"
-            "<p>Runs offline. No browser, server, or account. No game is included; open your own ROM files.</p>").arg(OBSERVATORY_VERSION, qVersion()));
+            "<p>Runs offline. Two original examples are bundled; you can also open your own ROM files.</p>").arg(OBSERVATORY_VERSION, qVersion()));
     }));
     help->addAction(action("Licenses and notices", "licensesAction", {}, [this] { showLicenses(); }));
     help->addAction(action("About Qt", "aboutQtAction", {}, [] { QApplication::aboutQt(); }));
@@ -243,9 +245,11 @@ void MainWindow::buildActions() {
     toolbar->addWidget(spacer);
     badge_ = new QLabel; badge_->setObjectName("stateBadge");
     badge_->setToolTip(tips::key("ui.badge"));
+    badge_->setProperty("informationTopic", "time");
     toolbar->addWidget(badge_);
     cursor_ = new QLabel; cursor_->setObjectName("cursorLabel");
     cursor_->setToolTip(tips::key("ui.cursor"));
+    cursor_->setProperty("informationTopic", "time");
     toolbar->addWidget(cursor_);
 }
 
@@ -265,12 +269,16 @@ void MainWindow::buildCentral() {
     frameLabel_ = label({}, "frameLabel");
     frameLabel_->setWordWrap(false);
     frameLabel_->setToolTip(tips::key("ui.frame"));
+    frameLabel_->setProperty("informationTopic", "display");
     layout->addWidget(frameLabel_);
     setCentralWidget(central);
     connect(game_, &GameView::spriteClicked, this, [this](int index) {
         tilesDock_->show(); tilesDock_->raise();
         tiles_->selectSprite(index); game_->setSelectedSprite(index);
+        information_->select({InformationKind::Sprite, "oam", {}, 0, index});
+        informationDock_->show();
     });
+    connect(game_, &GameView::displayClicked, this, [this] { showInformation("display"); });
 }
 
 QDockWidget* MainWindow::makeDock(const QString& title, const QString& name, QWidget* content) {
@@ -300,7 +308,11 @@ void MainWindow::buildDocks() {
         case B::Ppu: case B::Lcd: memoryAt(0xFF40); break;
         case B::Cpu: cpuDock_->show(); cpuDock_->raise(); break;
         }
+        const char* topics[] = {"joypad", "cartridge", "cpu", "wram", "vram", "oam", "ppu", "display"};
+        diagram_->setHighlight({}, {block});
+        showInformation(topics[int(block)]);
     });
+    connect(diagram_, &SystemDiagram::topicActivated, this, [this](const QString& topic) { showInformation(topic.toStdString()); });
 
     auto* cpu = new QWidget;
     auto* cpuLayout = new QVBoxLayout(cpu);
@@ -320,6 +332,14 @@ void MainWindow::buildDocks() {
         }
     }
     cpuLayout->addWidget(registers_);
+    auto selectRegister = [this](int column) {
+        const char* keys[] = {"reg.af", "reg.bc", "reg.de", "reg.hl", "reg.sp", "reg.pc"};
+        if (column < 0 || column >= 6) return;
+        information_->select({InformationKind::Register, informationTopicForGlossary(keys[column]), keys[column], 0, column});
+        informationDock_->show();
+    };
+    connect(registers_, &QTableWidget::cellClicked, this, [selectRegister](int, int column) { selectRegister(column); });
+    connect(registers_->horizontalHeader(), &QHeaderView::sectionClicked, this, selectRegister);
     auto* flagRow = new QHBoxLayout;
     flagRow->setSpacing(4);
     flagRow->addWidget(new QLabel("Flags"));
@@ -329,16 +349,19 @@ void MainWindow::buildDocks() {
         flagChips_[std::size_t(i)]->setObjectName(QString("flag%1").arg(QChar("ZNHC"[i])));
         flagChips_[std::size_t(i)]->setTextFormat(Qt::RichText);
         flagChips_[std::size_t(i)]->setToolTip(tips::key(flagKeys[i]));
+        flagChips_[std::size_t(i)]->setProperty("informationFlag", i);
         flagRow->addWidget(flagChips_[std::size_t(i)]);
     }
     flags_ = new QLabel; flags_->setObjectName("flagsLabel");
     flags_->setToolTip(tips::make("A · the accumulator", q(glossary("reg.af").body)));
+    flags_->setProperty("informationTopic", "registers");
     flagRow->addWidget(flags_);
     flagRow->addStretch();
     cpuLayout->addLayout(flagRow);
     instruction_ = label({}, "instructionLabel");
     instruction_->setFont(style::monospace());
     instruction_->setToolTip(tips::key("cpu.instruction"));
+    instruction_->setProperty("informationTopic", "instructions");
     cpuLayout->addWidget(instruction_);
     cpuLayout->addStretch();
     cpuDock_ = makeDock("CPU · instruction boundary", "cpuDock", cpu);
@@ -370,7 +393,9 @@ void MainWindow::buildDocks() {
     window_->setToolTip(tips::key("memory.window"));
     window_->setStyleSheet(QString("color: %1;").arg(style::muted.name()));
     memLayout->addWidget(window_);
-    connect(region_, qOverload<int>(&QComboBox::activated), this, [this](int index) { setMemoryBase(std::uint16_t(region_->itemData(index).toUInt())); });
+    connect(region_, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+        const auto a = std::uint16_t(region_->itemData(index).toUInt()); setMemoryBase(a); selectAddress(a);
+    });
     connect(address_, &QLineEdit::returnPressed, this, [this] {
         auto text = address_->text().trimmed(); text.remove('$');
         bool ok = false; auto v = text.toUInt(&ok, 16);
@@ -401,12 +426,14 @@ void MainWindow::buildDocks() {
         selectAddress(std::uint16_t(memoryBase_ + row * 8 + column - 1));
     });
     memoryDock_ = makeDock("Memory", "memoryDock", mem);
+    connect(memory_->horizontalHeader(), &QHeaderView::sectionClicked, this, [this] { showInformation("memory"); });
 
     cartridge_ = new CartridgePanel;
     batteryStatus_ = label({}, "batteryStatus");
     batteryStatus_->setTextFormat(Qt::RichText);
     batteryStatus_->setTextInteractionFlags(Qt::TextBrowserInteraction);
     batteryStatus_->setToolTip(tips::key("cart.save"));
+    batteryStatus_->setProperty("informationTopic", "battery");
     qobject_cast<QVBoxLayout*>(cartridge_->layout())->insertWidget(1, batteryStatus_);
     connect(batteryStatus_, &QLabel::linkActivated, this, [this](const QString& link) {
         if (link == "save:retry") saveBattery();
@@ -425,8 +452,21 @@ void MainWindow::buildDocks() {
     });
 
     tiles_ = new TileInspector;
-    tilesDock_ = makeDock("Sprites and tiles", "tilesDock", tiles_);
-    connect(tiles_, &TileInspector::spriteSelected, this, [this](int index) { game_->setSelectedSprite(index); });
+    auto* graphicsScroll = new QScrollArea; graphicsScroll->setObjectName("graphicsScroll");
+    graphicsScroll->setWidget(tiles_); graphicsScroll->setWidgetResizable(true);
+    graphicsScroll->setFrameShape(QFrame::NoFrame);
+    tilesDock_ = makeDock("Sprites and tiles", "tilesDock", graphicsScroll);
+    connect(tiles_, &TileInspector::spriteSelected, this, [this](int index) {
+        game_->setSelectedSprite(index);
+        if (index >= 0) { information_->select({InformationKind::Sprite, "oam", {}, 0, index}); informationDock_->show(); }
+    });
+    connect(tiles_, &TileInspector::tileSelected, this, [this](int tile) {
+        information_->select({InformationKind::Tile, "tile-data", {}, 0, tile}); informationDock_->show();
+    });
+    connect(tiles_, &TileInspector::mapCellSelected, this, [this](std::uint16_t a, int) {
+        selectAddress(a);
+        information_->select({InformationKind::MapCell, "tile-map", {}, a}); informationDock_->show();
+    });
     connect(tiles_, &TileInspector::addressActivated, this, [this](std::uint16_t a) {
         memoryDock_->show(); memoryDock_->raise();
         selectAddress(a);
@@ -447,6 +487,7 @@ void MainWindow::buildDocks() {
     traceLayout->setContentsMargins(6, 6, 6, 6);
     traceStatus_ = label({}, "traceStatusLabel");
     traceStatus_->setToolTip(tips::key("writes.status"));
+    traceStatus_->setProperty("informationTopic", "writes");
     traceLayout->addWidget(traceStatus_);
     writes_ = table(0, 4, {"Tick end", "Instruction", "Address / name", "Before → after / effect"});
     writes_->setObjectName("writeTable");
@@ -468,44 +509,19 @@ void MainWindow::buildDocks() {
         if (found == snapshot_.writes.end()) return;
         selectAddress(found->address);
         selectedEvent_ = id; updateWriter();
+        information_->select({InformationKind::Write, "writes", {}, selectedAddress_, 0, id}); informationDock_->show();
     });
     writesDock_ = makeDock("Captured writes", "writesDock", trace);
 
-    auto* lesson = new QWidget;
-    auto* lessonLayout = new QVBoxLayout(lesson);
-    lessonLayout->setContentsMargins(10, 6, 10, 8);
-    lessonProgress_ = label({}, "lessonProgress");
-    lessonProgress_->setTextFormat(Qt::RichText);
-    lessonLayout->addWidget(lessonProgress_);
-    lessonHeading_ = label({}, "lessonHeading");
-    auto headingFont = lessonHeading_->font(); headingFont.setPointSizeF(headingFont.pointSizeF() + 3); headingFont.setBold(true);
-    lessonHeading_->setFont(headingFont);
-    lessonLayout->addWidget(lessonHeading_);
-    lessonBody_ = label({}, "lessonBody");
-    lessonBody_->setTextFormat(Qt::RichText);
-    lessonBody_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    auto* scroll = new QScrollArea;
-    scroll->setWidget(lessonBody_);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    lessonLayout->addWidget(scroll, 1);
-    auto* buttons = new QHBoxLayout;
-    lessonAction_ = new QPushButton; lessonAction_->setObjectName("primaryAction");
-    auto actionFont = lessonAction_->font(); actionFont.setBold(true); lessonAction_->setFont(actionFont);
-    connect(lessonAction_, &QPushButton::clicked, this, [this] { advanceLesson(); });
-    buttons->addWidget(lessonAction_);
-    lessonStop_ = new QPushButton("Stop"); lessonStop_->setObjectName("lessonStop");
-    lessonStop_->setToolTip(tips::key("lesson.stop"));
-    connect(lessonStop_, &QPushButton::clicked, this, [this] { stopLesson(); });
-    buttons->addWidget(lessonStop_);
-    buttons->addStretch();
-    lessonFollow_ = new QPushButton("Inspect player_x");
-    lessonFollow_->setObjectName("inspectMovementButton");
-    lessonFollow_->setToolTip(tips::key("lesson.follow"));
-    connect(lessonFollow_, &QPushButton::clicked, this, [this] { inspectMovement(); });
-    buttons->addWidget(lessonFollow_);
-    lessonLayout->addLayout(buttons);
-    lessonDock_ = makeDock("Lesson", "lessonDock", lesson);
+    information_ = new InformationPanel;
+    informationDock_ = makeDock("Selection info", "informationDock", information_);
+    connect(information_, &InformationPanel::addressActivated, this, [this](std::uint16_t a) {
+        memoryDock_->show(); memoryDock_->raise(); selectAddress(a);
+    });
+    connect(cartridge_->map(), &BankMap::bankSelected, this, [this](int bank, bool ram) {
+        information_->select({InformationKind::Bank, ram ? "cart-ram" : "banks", {}, 0, bank, 0, ram});
+        informationDock_->show();
+    });
 
     viewMenu_->addSeparator();
     viewMenu_->addAction(spritesAction_);
@@ -519,11 +535,12 @@ void MainWindow::buildDocks() {
 
     activityLabel_ = new QLabel; activityLabel_->setObjectName("activityLabel");
     activityLabel_->setToolTip(tips::key("ui.activity"));
+    activityLabel_->setProperty("informationTopic", "activity");
     statusBar()->addPermanentWidget(activityLabel_);
 }
 
 void MainWindow::resetLayout() {
-    const QList<QDockWidget*> all{systemDock_, cpuDock_, memoryDock_, cartridgeDock_, tilesDock_, mapDock_, writesDock_, lessonDock_};
+    const QList<QDockWidget*> all{systemDock_, cpuDock_, memoryDock_, cartridgeDock_, tilesDock_, mapDock_, writesDock_, informationDock_};
     for (auto* d : all) { d->setFloating(false); removeDockWidget(d); }
     addDockWidget(Qt::RightDockWidgetArea, systemDock_);
     addDockWidget(Qt::RightDockWidgetArea, cpuDock_);
@@ -532,7 +549,7 @@ void MainWindow::resetLayout() {
     tabifyDockWidget(cartridgeDock_, tilesDock_);
     tabifyDockWidget(tilesDock_, mapDock_);
     tabifyDockWidget(mapDock_, writesDock_);
-    addDockWidget(Qt::BottomDockWidgetArea, lessonDock_);
+    addDockWidget(Qt::BottomDockWidgetArea, informationDock_);
     for (auto* d : all) d->show();
     memoryDock_->raise();
     const int h = height();
@@ -540,7 +557,7 @@ void MainWindow::resetLayout() {
     // The game needs about 500 px for 3× scale; the inspectors get the rest.
     resizeDocks({systemDock_}, {std::max(560, width() - 520)}, Qt::Horizontal);
     // Leave the game enough height for 3× scale at the default size, 2× at the minimum.
-    resizeDocks({lessonDock_}, {std::clamp(h - 640, 220, 300)}, Qt::Vertical);
+    resizeDocks({informationDock_}, {std::clamp(h - 640, 200, 300)}, Qt::Vertical);
 }
 
 void MainWindow::warmTeaching() {
@@ -566,7 +583,7 @@ void MainWindow::warmBankDemo() {
 }
 void MainWindow::run() {
     if (running_) return;
-    leaveLesson();
+   
     running_ = true; runStartTick_ = engine_.ticks(); wall_.restart(); published_.restart();
     runAction_->setText("Pause · F5");
     for (auto* a : {stepAction_, frameAction_, untilAction_}) a->setEnabled(false);
@@ -588,18 +605,18 @@ void MainWindow::tick() {
     if (published_.elapsed() >= 33) { refresh(); published_.restart(); }
 }
 void MainWindow::instructionStep() {
-    pause(); leaveLesson();
+    pause();
     auto result = engine_.stepInstruction(); refresh();
     statusBar()->showMessage(result.executedInstruction ? "Executed one opcode; every state panel shows the new boundary."
         : "No opcode executed within two frame periods (CPU may be halted/stopped). Time advanced; the cursor shows the exact result.", 6000);
 }
 void MainWindow::frameStep() {
-    pause(); leaveLesson(); auto result = engine_.stepFrame(); refresh();
+    pause(); auto result = engine_.stepFrame(); refresh();
     statusBar()->showMessage(result.completedFrame ? "Advanced to the next completed output, then finished its enclosing instruction."
         : "No completed output within the frame-step limit.", 6000);
 }
 WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
-    pause(); leaveLesson();
+    pause();
     selectedEvent_.reset();
     auto result = engine_.runUntilWrite(address, 60 * frameTicks);
     refresh();
@@ -625,7 +642,7 @@ WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
     return result;
 }
 WatchResult MainWindow::runUntilBankChange() {
-    pause(); leaveLesson();
+    pause();
     selectedEvent_.reset();
     auto result = engine_.runUntilBankChange(60 * frameTicks);
     refresh();
@@ -659,7 +676,7 @@ void MainWindow::loadTeaching() {
     engine_.loadTeaching(); warmTeaching();
     romName_ = "teaching game"; savePath_.clear();
     batteryProblem_.clear(); batteryBlocked_ = false;
-    setWindowTitle("Console Observatory — DMG teaching lab");
+    setWindowTitle("Console Observatory — DMG exploration lab");
     afterLoad(); setMemoryBase(0xC000);
 }
 void MainWindow::loadBankDemo() {
@@ -668,9 +685,6 @@ void MainWindow::loadBankDemo() {
     if (!loadBytes(bytes, "bank-switching demo", folder.isEmpty() ? QString() : folder + "/bankdemo.sav")) return;
     setMemoryBase(0x4000);
     cartridgeDock_->show(); cartridgeDock_->raise();
-}
-LessonStep MainWindow::idleLessonStep() const {
-    return snapshot_.teaching ? LessonStep::Start : snapshot_.bankDemo ? LessonStep::BankDemo : LessonStep::NeedsTeachingRom;
 }
 void MainWindow::afterLoad() {
     // Nothing from the previous session is a "before" for the new one.
@@ -681,7 +695,7 @@ void MainWindow::afterLoad() {
     tiles_->resetSelection();
     refresh();
     updateBatteryStatus();
-    setLessonStep(idleLessonStep());
+    information_->reset();
 }
 void MainWindow::loadFile(const QString& path) {
     pause(); QFile file(path);
@@ -845,6 +859,8 @@ void MainWindow::selectAddress(std::uint16_t address) {
     selectedAddress_ = address;
     map_->view()->setSelectedAddress(address);
     updateSelection(); updateWriter();
+    information_->select({InformationKind::Memory, informationTopicForAddress(address), {}, address});
+    informationDock_->show();
 }
 void MainWindow::updateSelection() {
     if (selectedAddress_ >= memoryBase_ && selectedAddress_ < memoryBase_ + memoryWindow) {
@@ -882,164 +898,10 @@ void MainWindow::updateSelection() {
     window_->setText(text);
     window_->setVisible(!text.isEmpty());
 }
-void MainWindow::inspectMovement() {
-    pause(); memoryDock_->show(); memoryDock_->raise(); setMemoryBase(0xC000); selectAddress(0xC000);
+void MainWindow::showInformation(const std::string& topic) {
+    information_->showTopic(topic);
+    informationDock_->show(); informationDock_->raise();
 }
-
-void MainWindow::setLessonStep(LessonStep step, const LessonEvidence& evidence, const QString& problem) {
-    lessonStep_ = step;
-    const auto page = lessonPage(step, snapshot_, evidence);
-    lessonHeading_->setText(q(page.heading));
-    lessonBody_->setText(q(page.body) + (problem.isEmpty() ? QString() : "<p style='color:#f2a65a'>" + problem + "</p>"));
-    lessonAction_->setText(q(page.action));
-    lessonStop_->setVisible(step != LessonStep::Start && step != LessonStep::NeedsTeachingRom && step != LessonStep::Done && step != LessonStep::FreeExploration &&
-                            step != LessonStep::BankDemo);
-    lessonFollow_->setVisible(snapshot_.teaching);
-    lessonStop_->setToolTip(step == LessonStep::BankSwitched ? tips::make("Stop", "Go back to the bank demo's introduction.")
-                                                             : tips::key("lesson.stop"));
-    using B = SystemDiagram::Block; using P = SystemDiagram::Path;
-    if (step == LessonStep::BankDemo || step == LessonStep::BankSwitched || step == LessonStep::NeedsTeachingRom || step == LessonStep::FreeExploration) {
-        lessonProgress_->setText(QString("<span style='color:%1'>%2</span>").arg(style::muted.name(),
-            step == LessonStep::NeedsTeachingRom ? "Your ROM · " + romName_.toHtmlEscaped() :
-            step == LessonStep::FreeExploration ? QString("Free exploration · teaching game") : QString("Bundled bank-switching demo")));
-        if (step == LessonStep::NeedsTeachingRom || step == LessonStep::FreeExploration) diagram_->setHighlight({}, {});
-        else diagram_->setHighlight({P::RomCpu}, {B::Cartridge, B::Cpu});
-        return;
-    }
-    const int current = lessonStepNumber(step);
-    static const char* names[] = {"Joypad", "WRAM", "OAM", "Frame", "Tile"};
-    QStringList parts;
-    for (int i = 1; i <= lessonStepCount; ++i) {
-        const auto colour = i < current ? style::accent : i == current ? style::highlight : style::muted;
-        parts << QString("<span style='color:%1'>%2 %3 %4</span>").arg(colour.name(), i < current ? "✓" : i == current ? "●" : "○").arg(i).arg(names[i - 1]);
-    }
-    lessonProgress_->setText(parts.join("&nbsp;&nbsp;→&nbsp;&nbsp;"));
-    switch (step) {
-    case LessonStep::Holding: diagram_->setHighlight({P::JoypadCpu}, {B::Joypad, B::Cpu}); break;
-    case LessonStep::Stored: diagram_->setHighlight({P::CpuWram}, {B::Cpu, B::Wram}); break;
-    case LessonStep::Copied: diagram_->setHighlight({P::CpuOam}, {B::Cpu, B::Oam}); break;
-    case LessonStep::Drawn: diagram_->setHighlight({P::OamPpu, P::VramPpu, P::PpuLcd}, {B::Oam, B::Vram, B::Ppu, B::Lcd}); break;
-    case LessonStep::Tile: diagram_->setHighlight({P::VramPpu}, {B::Vram}); break;
-    default: diagram_->setHighlight({}, {}); break;
-    }
-}
-void MainWindow::leaveLesson() {
-    if ((!snapshot_.teaching && !snapshot_.bankDemo) || lessonStep_ == LessonStep::FreeExploration || lessonStep_ == LessonStep::BankDemo) return;
-    engine_.releaseButtons();
-    spritesAction_->setChecked(false); changesAction_->setChecked(false);
-    game_->setShowSprites(false); game_->setShowChanges(false); game_->setSelectedSprite(-1);
-    setLessonStep(snapshot_.teaching ? LessonStep::FreeExploration : LessonStep::BankDemo);
-}
-void MainWindow::stopLesson() {
-    engine_.setButton(Button::Right, false);
-    engine_.setButton(Button::A, false);
-    spritesAction_->setChecked(false); changesAction_->setChecked(false);
-    game_->setShowSprites(false); game_->setShowChanges(false); game_->setSelectedSprite(-1);
-    refresh();
-    setLessonStep(idleLessonStep());
-}
-void MainWindow::advanceLesson() {
-    pause();
-    statusBar()->clearMessage();
-    auto evidence = [](const WatchResult& r) {
-        LessonEvidence e;
-        e.write = r.write; e.banksBefore = r.banksBefore; e.banksAfter = r.banksAfter;
-        e.instructions = r.instructions; e.frames = r.frames;
-        return e;
-    };
-    auto needCapture = [this] {
-        if (traceAction_->isChecked()) return;
-        traceAction_->setChecked(true); engine_.setTraceEnabled(true);
-        statusBar()->showMessage("Capture writes turned on: the lesson stops on real write attempts.", 6000);
-    };
-    switch (lessonStep_) {
-    case LessonStep::NeedsTeachingRom:
-        loadTeaching();
-        return;
-    case LessonStep::BankDemo:
-    case LessonStep::BankSwitched: {
-        if (!snapshot_.bankDemo) { setLessonStep(idleLessonStep()); return; }
-        needCapture();
-        // A fresh press: the demo acts on A going from released to held, so first
-        // let it store a sample with A released.
-        engine_.setButton(Button::A, false);
-        engine_.runUntilWrite(bankdemo::buttons, 2 * frameTicks);
-        engine_.setButton(Button::A, true);
-        const auto r = engine_.runUntilBankChange(4 * frameTicks);
-        engine_.setButton(Button::A, false);
-        refresh();
-        if (r.stop != WatchResult::Stop::BankChange) {
-            setLessonStep(LessonStep::BankDemo, {}, "No bank change happened within four frames of pressing A.");
-            return;
-        }
-        cartridgeDock_->show(); cartridgeDock_->raise();
-        setLessonStep(LessonStep::BankSwitched, evidence(r));
-        return;
-    }
-    case LessonStep::Start:
-    case LessonStep::Done:
-    case LessonStep::FreeExploration:
-        if (!snapshot_.teaching) { setLessonStep(idleLessonStep()); return; }
-        // Manual exploration may have stopped anywhere in the game loop.
-        // Begin from the same completed frame every time so each claim holds.
-        engine_.restart(); warmTeaching(); afterLoad();
-        lessonStartX_ = snapshot_.playerX; lessonStartFrame_ = snapshot_.frames;
-        engine_.releaseButtons();
-        engine_.setButton(Button::Right, true);
-        refresh();
-        setLessonStep(LessonStep::Holding);
-        return;
-    case LessonStep::Holding: {
-        needCapture();
-        engine_.setButton(Button::Right, true);
-        const auto r = engine_.runUntilWrite(demo::player_x, 4 * frameTicks);
-        refresh();
-        if (r.stop != WatchResult::Stop::Write || snapshot_.playerX != lessonStartX_ + 1 || snapshot_.frames != lessonStartFrame_) {
-            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected one-pixel store was not observed before a new frame. Start again to repeat from a known boundary.");
-            return;
-        }
-        memoryDock_->show(); memoryDock_->raise();
-        selectAddress(demo::player_x);
-        setLessonStep(LessonStep::Stored, evidence(r));
-        return;
-    }
-    case LessonStep::Stored: {
-        needCapture();
-        const auto r = engine_.runUntilWrite(0xFE01, 2 * frameTicks);
-        refresh();
-        if (r.stop != WatchResult::Stop::Write || snapshot_.video.oam[1] != snapshot_.playerX + 8 || snapshot_.frames != lessonStartFrame_) {
-            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected OAM store was not observed at the lesson boundary. Start again to establish a fresh frame."); return;
-        }
-        spritesAction_->setChecked(true); game_->setShowSprites(true); game_->setSelectedSprite(0);
-        selectAddress(0xFE01);
-        setLessonStep(LessonStep::Copied, evidence(r));
-        return;
-    }
-    case LessonStep::Copied: {
-        const auto r = engine_.stepFrame();
-        refresh();
-        changesAction_->setChecked(true); game_->setShowChanges(true);
-        LessonEvidence e;
-        e.frames = r.completedFrame ? 1u : 0u; e.changedPixels = game_->changedPixels();
-        if (!r.completedFrame || snapshot_.frames != lessonStartFrame_ + 1 || snapshot_.frameKind != "VBlank frame" || e.changedPixels <= 0) {
-            leaveLesson(); setLessonStep(LessonStep::FreeExploration, {}, "The expected changed frame was not observed. Start again to repeat the lesson from a fresh frame."); return;
-        }
-        setLessonStep(LessonStep::Drawn, e);
-        return;
-    }
-    case LessonStep::Drawn:
-        tilesDock_->show(); tilesDock_->raise();
-        tiles_->selectSprite(0); game_->setSelectedSprite(0);
-        setLessonStep(LessonStep::Tile);
-        return;
-    case LessonStep::Tile:
-        engine_.setButton(Button::Right, false);
-        refresh();
-        setLessonStep(LessonStep::Done);
-        return;
-    }
-}
-
 void MainWindow::refresh() {
     if (snapshot_.ticks) previous_ = snapshot_;
     snapshot_ = engine_.snapshot(memoryBase_);
@@ -1098,6 +960,7 @@ void MainWindow::refresh() {
     updateBatteryStatus();
     updatePanels(!running_);
     updateSelection(); updateWriter();
+    information_->setSnapshot(s);
 }
 void MainWindow::updatePanels(bool force) {
     const auto& s = snapshot_;
@@ -1262,7 +1125,18 @@ bool MainWindow::ownsKeyboard(QWidget* widget) const {
     return dock && dock->parentWidget() == this;
 }
 bool MainWindow::eventFilter(QObject* object, QEvent* event) {
-    if (event->type() == QEvent::WindowDeactivate && object == this) { leaveLesson(); engine_.releaseButtons(); }
+    if (event->type() == QEvent::MouseButtonRelease) {
+        if (auto* widget = qobject_cast<QWidget*>(object); widget && ownsKeyboard(widget)) {
+            const auto flag = widget->property("informationFlag");
+            if (flag.isValid()) {
+                const int i = flag.toInt(); const char* keys[] = {"flag.z", "flag.n", "flag.h", "flag.c"};
+                if (i >= 0 && i < 4) { information_->select({InformationKind::Flag, "flags", keys[i], 0, i}); informationDock_->show(); }
+            } else if (const auto topic = widget->property("informationTopic").toString(); !topic.isEmpty()) {
+                showInformation(topic.toStdString());
+            }
+        }
+    }
+    if (event->type() == QEvent::WindowDeactivate && object == this) { engine_.releaseButtons(); }
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
         auto* widget = qobject_cast<QWidget*>(object);
         if (!ownsKeyboard(widget)) return QMainWindow::eventFilter(object, event);
@@ -1270,12 +1144,11 @@ bool MainWindow::eventFilter(QObject* object, QEvent* event) {
         auto button = buttonFor(key->key());
         // Text fields keep their keys, and Enter still activates a focused button.
         // Always release a game key on key-up even if focus changed while it was held.
-        const bool textField = qobject_cast<QLineEdit*>(widget);
+        const bool textField = qobject_cast<QLineEdit*>(widget) || (information_ && information_->isAncestorOf(widget));
         const bool enterOnButton = key->key() == Qt::Key_Return && qobject_cast<QAbstractButton*>(widget);
         if (button && !key->isAutoRepeat() && (event->type() == QEvent::KeyRelease || (!textField && !enterOnButton))) {
-            if (event->type() == QEvent::KeyPress) leaveLesson();
             engine_.setButton(*button, event->type() == QEvent::KeyPress);
-            return !enterOnButton;
+            return !enterOnButton && !textField;
         }
     }
     return QMainWindow::eventFilter(object, event);

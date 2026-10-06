@@ -24,6 +24,7 @@ public:
     const QImage& image() const { return image_; }
 signals:
     void spriteClicked(int index);
+    void displayClicked();
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;

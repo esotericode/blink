@@ -212,6 +212,7 @@ ActivityPanel::ActivityPanel(QWidget* parent) : QWidget(parent) {
     auto* top = new QHBoxLayout;
     interval_ = new QLabel;
     interval_->setObjectName("activityInterval");
+    interval_->setProperty("informationTopic", "activity");
     interval_->setWordWrap(true);
     top->addWidget(interval_, 1);
     mode_ = new QComboBox;

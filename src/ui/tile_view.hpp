@@ -9,6 +9,7 @@ class QLabel;
 class QTableWidget;
 
 namespace observatory {
+class TileMapView;
 // How tile pixels are coloured: through a palette register, or as raw colour numbers.
 enum class TilePalette { Background, Object0, Object1, ColorNumbers };
 
@@ -74,6 +75,8 @@ public:
     int selectedTile() const;
 signals:
     void spriteSelected(int index);
+    void tileSelected(int tile);
+    void mapCellSelected(std::uint16_t address, int tile);
     void addressActivated(std::uint16_t address);
 private:
     TilePalette palette() const;
@@ -83,9 +86,12 @@ private:
     QButtonGroup* blocks_{};
     TileSheet* sheet_{};
     TileDetail* detail_{};
+    TileMapView* maps_{};
+    QLabel* mapCaption_{};
     QLabel *caption_{}, *oamSource_{};
     VideoState video_;
     int sprite_ = -1;
+    int mapAddress_ = -1;
     bool haveData_ = false;
 };
 }

@@ -19,6 +19,7 @@ public:
     QSize sizeHint() const override { return {700, 190}; }
 signals:
     void windowActivated(std::uint16_t address);
+    void bankSelected(int bank, bool ram);
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;

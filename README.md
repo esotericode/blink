@@ -1,13 +1,12 @@
 # Console Observatory
 
-A native desktop Game Boy teaching lab. Run an original tiny game, press Right,
-and follow the change from the joypad register through a CPU instruction to
-`player_x`, sprite memory, the next displayed frame, and the tile bits that
-make the picture. Then open any Game Boy ROM you own and watch the same
-panels, including which cartridge banks the CPU can see and every bank
-switch. C++20 / Qt 6 Widgets / SameBoy; Linux and Windows.
+A native desktop Game Boy exploration lab. Run a game, select something in
+the CPU, memory, graphics, or cartridge views, and read a detailed explanation
+of what it is, how it works, and how it connects to the rest of the machine.
+Selection info follows the most recent selection and works with any ROM.
+C++20 / Qt 6 Widgets / unchanged SameBoy; Linux and Windows.
 
-![Console Observatory paused at lesson step 3: the CPU has written sprite 0's X into OAM; the outline shows the new position while the picture is still the previous frame](docs/console-observatory.png)
+![Selection info explains work RAM beside the paused star example and synchronized inspectors](docs/selection-info.png)
 
 The application starts paused with its bundled game already visible. Normal
 use works offline in one executable with ordinary Qt runtime libraries. No
@@ -25,12 +24,17 @@ The Windows build is not code-signed, so SmartScreen may ask first
 
 ## What you can do
 
-- **Follow one press of Right** (Lesson panel). Five steps, each ended by a
-  real emulator event: hold Right → run until the CPU stores `player_x` →
-  run until it copies `player_x + 8` into sprite 0's OAM X byte (an outline
-  shows where OAM now puts the sprite, ahead of the unchanged picture) →
-  advance one frame (changed pixels are marked) → read the sprite's tile bits.
-  The system overview highlights the path at every step.
+- **Selection info**: click a memory byte, register, flag, system part,
+  sprite, tile, map cell, bank, or captured write. Read what it is, how it
+  works, how games use it, and what the observation can tell you. There are
+  **38 linked hardware topics**, a topic chooser, and Back/Forward reading
+  history. The guided demo tutorials have been removed; both original
+  examples remain playable. **F1** restores the information panel.
+- **Background/window maps**: inspect the current 32×32 map selected for
+  either layer, or either physical map at `$9800`/`$9C00`. Clicking a cell
+  selects its map byte, resolves its pattern using LCDC's addressing mode,
+  and opens a detailed tile-map explanation. The view reconstructs current
+  storage rather than historical screen pixels.
 - **Run until written** (F9): select any memory byte and run until the CPU
   writes it. All panels then show that instruction boundary.
 - **Sprites and tiles**: the 40 OAM records, VRAM tiles in 128-tile blocks,
@@ -53,11 +57,10 @@ The Windows build is not code-signed, so SmartScreen may ask first
   with its effect (`ROM bank 1 → 2`). **Run until the bank changes** stops
   right after the next switch. Memory and CPU panels name the mapped bank and
   the file offset, so the same address showing different code is explained.
-![The bank-switching demo paused right after the MBC1 bank switch: the Cartridge panel links the CPU's $4000 window to ROM bank 2, lists the controller write $2000 ← $02 with its effect "ROM bank 1 → 2", and the lesson explains it](docs/cartridge-banks.png)
 
 - **Bank-switching demo** (File › Bundled examples): an original MBC1
   cartridge whose banks 1–3 each keep a different routine at `$4000`. The
-  Lesson panel presses A and stops at the real bank switch.
+  A (keyboard Z) switches banks. The generic Run until the bank changes control can pause at the switch.
 - **Battery saves**: battery-backed cartridge RAM is read from and written to
   a `.sav` file next to the ROM (same name), automatically every few seconds
   while it changes, when you open another game, and on exit (File › Save
@@ -87,12 +90,14 @@ Panels dock, tab, float, and close; **View › Reset layout** restores them.
 Tile-row and memory-map links reveal the selected byte in Memory. Sprite
 selection follows tile changes as the game animates; choosing a tile manually
 pins that tile. Browsing while paused preserves the last activity interval.
-Manual execution, input, or capture changes leave the guided lesson for free
-exploration; starting again establishes a fresh frame. The lesson pairs real
-instructions and values with prediction and explanation prompts.
+Reading does not run, restart, or replace the game. The article and reading
+position stay stable during execution; the compact observed-facts label
+updates at the shared boundary. Starting a new ROM clears session-specific
+selection/history. Explanations describe regions and hardware concepts,
+without inventing a unique description for every memory cell.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy
 A/B/Select/Start; this game only uses directions. Game keys work while tables
-have focus, text fields keep their keys, and Enter still activates a focused
+have focus, text fields and the information reader keep their keys, and Enter still activates a focused
 button. Losing window focus releases held buttons.
 
 `player_x`/`player_y` are screen coordinates at `$C000`/`$C001`; `$C002` stores
@@ -173,7 +178,7 @@ cmake --install build --prefix out\install
 cpack --config build\CPackConfig.cmake -B out
 ```
 
-This writes `out\console-observatory-0.5.0-windows-x64.zip` (about 12 MB). Installing runs
+This writes `out\console-observatory-0.6.0-windows-x64.zip` (about 12 MB). Installing runs
 `windeployqt` (through Qt's CMake deployment support), which copies the Qt
 DLLs, platform and style plugins, the MinGW runtime, and a `qt.conf` beside
 `console-observatory.exe`. Unzip anywhere and run the `.exe`; the target
@@ -191,7 +196,11 @@ from `PATH`.
 from one commit, runs the same checks as CI on each, and publishes them with
 `SHA256SUMS.txt` as a GitHub release. Write the notes in
 `docs/releases/vX.Y.Z.md` (first line `# Title`), bump `project(... VERSION)`
-in `CMakeLists.txt`, then push a tag:
+in `CMakeLists.txt`, then merge the verified change into **main**. The
+workflow detects the new version, builds and tests both platforms, creates a
+draft, attaches packages/checksums, and publishes after all checks succeed.
+An already published version is skipped and never replaced automatically.
+Draft retries keep the same source commit. A tag remains an alternative:
 
 ```bash
 git tag v0.6.0 && git push origin v0.6.0
@@ -238,7 +247,7 @@ The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 cmake --install build --prefix "$PWD/out/install"
 ./out/install/bin/console-observatory
 cpack --config build/CPackConfig.cmake -B out
-sudo apt install ./out/console-observatory_0.5.0_amd64.deb
+sudo apt install ./out/console-observatory_0.6.0_amd64.deb
 console-observatory
 ```
 
@@ -267,7 +276,7 @@ not verified yet. Build without verification executables with
   enclosing atomic core step. LCD-off/artificial output is labeled.
 - **Run until written** stops at the end of the atomic core step in which the
   CPU attempted a write to the byte (WRAM echo addresses match), or at its
-  limit (one emulated second; four frames inside the lesson). It needs write
+  limit (one emulated second). It needs write
   capture and records the same evidence as any other captured write.
 - Live activity summarizes a labeled interval between published snapshots.
   It counts opcodes and write attempts, not reads, PPU fetches, or bus cycles.
@@ -309,7 +318,7 @@ not verified yet. Build without verification executables with
 
 ## Verification and next milestone
 
-Five CTest suites: engine behavior (including save/bank/pacing regressions), rendered native Qt widgets,
+Six CTest suites: the detailed hardware reference and address routing, engine behavior (including save/bank/pacing regressions), rendered native Qt widgets,
 deterministic ROM generation, vendored source integrity, and a check that every
 tooltip the interface uses exists in the glossary and stays short. The engine suite
 compares full SameBoy save-state bytes, registers, WRAM, VRAM, OAM, frame
@@ -323,10 +332,11 @@ disassembly and per-bank counts, cartridge RAM, battery save/restore, banked
 trace parity, and pure inspection with a bank mapped. The DMA group checks the
 copy's timing against SameBoy itself (the last byte lands inside the checked
 window), OAM against the source, restarts, and tracing on/off parity. The widget
-suite drives both lessons through their buttons, opens an MBC5 ROM by drag and
-drop with an existing `.sav`, follows a DMA-written sprite byte back to its
-source, hovers real controls for their tooltips, and asserts the real state at
-every stop.
+suite exercises memory/register/flag/sprite/tile/map selection, related-topic
+links and history, ROM-independent explanations, stable reading during live
+execution, and full-state equality after browsing. It also opens an MBC5 ROM
+by drag and drop with an existing `.sav`, follows DMA evidence to its source,
+checks save failure/recovery, and hovers real controls for their tooltips.
 
 Linux: passed offscreen and under X11 (local and GitHub Actions). Windows:
 GitHub Actions builds with official Qt 6.8.3 MinGW, runs all suites, the
@@ -335,9 +345,10 @@ unzipped package; locally, a MinGW cross build passed the suites under Wine.
 A physical Windows desktop, real high-DPI monitors, and macOS remain
 unverified. See `docs/VERIFICATION.md` for exact evidence.
 
-Next useful milestone: an interrupt/timer timeline lesson (VBlank, STAT, timer)
-using real interrupt-flag and execution events, and a background-map view
-linking map entries to tiles.
+Next useful milestone: an interrupt/timer event inspector using real
+interrupt-flag and execution evidence, with explanations linked to the
+existing reference. Improve keyboard selection in the custom-painted views
+and validate the package on physical high-DPI Windows desktops.
 
 Read `PROJECT_GUIDE.md`, `AGENTS.md`, `STATUS.md`, `DECISIONS.md`, and
 `docs/TRACE_CONTRACT.md` before contributing. Third-party licenses and exact

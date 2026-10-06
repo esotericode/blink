@@ -3,6 +3,45 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Selection-driven reference and tile maps (0.6.0)
+
+PR #3 replaces the guided tutorial with contextual information. Local GCC
+compilation/checks pass for the 38-article reference, related-topic integrity,
+every address route, and IO/region boundaries. Glossary keys and vendored
+source hashes pass. No local Qt/CMake installation was available in this
+editing workspace; native evidence comes from CI.
+
+Regression coverage: memory/register/flag/sprite/tile/map/system selections,
+reading history and related links, full-state purity after browsing, stable
+article/scroll during execution, reader keyboard focus, arbitrary-ROM behavior,
+new-session reset, and signed tile-map addressing. Existing core/save/bank/DMA
+and native package-launch checks remain. Six CTests now include the standalone
+reference suite; the Qt-free ASan configuration has five.
+
+- At `a979cba`, [Linux run 39](https://github.com/esotericode/blink/actions/runs/37515225658)
+  passes the native build, **6/6 CTest**, native X11 interactions, **5/5
+  Qt-free Debug CTests with AddressSanitizer**, install, and `.deb` packaging.
+  [Windows run 35](https://github.com/esotericode/blink/actions/runs/37515225780)
+  passes all six suites, native Windows widgets, portable packaging, and
+  launching the unzipped package without Qt or MinGW on `PATH`.
+- At `0cb3414`, [Windows run 37](https://github.com/esotericode/blink/actions/runs/37516292275)
+  passes all of those Windows checks again after the layout fixes. Its
+  default 1280×930 and minimum 980×680 windows, contextual memory/sprite/tile/
+  map articles, compact map pane, scrolled map pane, and actual packaged
+  application render were inspected. The default game is 3× and the minimum
+  game is 2×. The reference body scrolls independently; the graphics panel
+  now scrolls to make the full map and explanation accessible in a short dock.
+  `docs/selection-info.png` is the current native default-window capture.
+- Layout review found and fixed a 1× game at the minimum size, a verbose facts
+  label consuming the reader, and inaccessible graphics content in short
+  docks. Widget tests also render the scrolled map and assert it is reachable.
+- The release workflow's actual preparation script was checked locally with
+  a mocked `gh`: new main/tag releases, skipping a published version, retrying
+  a draft at the same commit, and refusing a mismatched version or a draft
+  belonging to another commit. Refused/skipped cases performed no release
+  create/edit. A version and matching notes merged into main trigger the
+  existing Linux/Windows build-and-publish pipeline.
+
 ## 2026-10-06 — Release 0.5.0
 
 PR #2 merged as `ac848c9` after CI passed on `7f446d9` (Linux with the

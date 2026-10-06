@@ -31,9 +31,13 @@ const Map& entries() {
         {"panel.writes", {"Captured writes",
             "The most recent times the CPU wrote to memory, newest first, each with the instruction that did it.",
             "Click a row to select that byte in the Memory panel."}},
-        {"panel.lesson", {"Lesson",
-            "Short guided walks through the real machine. Each step runs the emulator until a specific event "
-            "happens, then pauses so every panel shows that moment.", {}}},
+        {"panel.information", {"Selection info",
+            "Detailed offline explanations for the item you selected most recently. Read how it works, how games use it, and what the current observation can tell you.",
+            "Select an item, browse a topic, or follow related links. Reading never runs the game."}},
+        {"info.back", {"Back", "Return to the previous topic or selection. This navigates explanations, not emulated time.", {}}},
+        {"info.forward", {"Forward", "Revisit the next explanation in your reading history.", {}}},
+        {"info.topics", {"Browse a hardware topic", "Read the full hardware reference without needing to select an item first. Related links connect concepts such as memory, banks, tiles, and sprites.", {}}},
+        {"tiles.maps", {"Background and window maps", "A reconstructed 32×32 grid of tile references from current VRAM, using the current addressing mode and BGP. Select the background, window, or either physical map.", "Click a cell for its entry, resolved pattern, and detailed map explanation."}},
 
         // Toolbar and menu actions.
         {"action.run", {"Run / pause · F5",
@@ -61,8 +65,7 @@ const Map& entries() {
             "Load a Game Boy cartridge image (.gb or .gbc file) up to 8 MiB. It starts paused at power-on.",
             "You can also drop a ROM file onto the window."}},
         {"action.teaching", {"Teaching game",
-            "A tiny original game made for this app: a star you move with the arrow keys. The guided button-press "
-            "lesson uses it.", {}}},
+            "A tiny original game made for this app: a star you move with the arrow keys. Source-defined variables help connect code, memory, and graphics.", {}}},
         {"action.bankdemo", {"Bank-switching demo",
             "An original cartridge with four ROM banks. Each press of A swaps a different bank in at the same "
             "address, and the screen shows which bank's code ran.", {}}},
@@ -272,10 +275,6 @@ const Map& entries() {
             "The stored byte before and after the write. For cartridge controller writes, the effect on the banks instead.",
             {}}},
 
-        // Lesson buttons.
-        {"lesson.stop", {"Stop", "End the lesson and release any button it is holding.", {}}},
-        {"lesson.follow", {"Inspect player_x",
-            "Select player_x ($C000) in the Memory panel and show which instruction wrote it last.", {}}},
     };
     return map;
 }
