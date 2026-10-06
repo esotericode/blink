@@ -102,7 +102,15 @@ if(OBSERVATORY_BUILD_GUI)
     if(WIN32 AND OBSERVATORY_DEPLOY_QT)
         # windeployqt copies the Qt DLLs, platform/style plugins, compiler runtime,
         # and writes qt.conf, so the installed folder runs on a machine without Qt.
-        if(Qt6_VERSION VERSION_GREATER_EQUAL 6.5)
+        if(Qt6_VERSION VERSION_GREATER_EQUAL 6.7)
+            # A Widgets app needs only the platform and style plugins. Skip software
+            # OpenGL, the D3D shader compiler, and plugin types that would pull in
+            # Qt Network and Qt Svg (about 20 MB in the Qt 6.8.3 package).
+            qt_generate_deploy_app_script(TARGET console-observatory
+                OUTPUT_SCRIPT observatory_deploy NO_UNSUPPORTED_PLATFORM_ERROR NO_TRANSLATIONS
+                DEPLOY_TOOL_OPTIONS --no-opengl-sw --no-system-d3d-compiler
+                    --skip-plugin-types generic,iconengines,imageformats,networkinformation,tls)
+        elseif(Qt6_VERSION VERSION_GREATER_EQUAL 6.5)
             qt_generate_deploy_app_script(TARGET console-observatory
                 OUTPUT_SCRIPT observatory_deploy NO_UNSUPPORTED_PLATFORM_ERROR NO_TRANSLATIONS)
         else()
