@@ -3,6 +3,23 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — First GitHub releases
+
+The Release workflow (`.github/workflows/release.yml`, run 1–3 by manual
+dispatch from `main` at `efa982b`) built each version from its own commit,
+passed that commit's CTest suites and native-platform widget suite on Linux and
+Windows, launched the unzipped Windows package with only System32 on `PATH`,
+and published:
+
+| Release | Commit | Windows ZIP | Ubuntu .deb | Notes |
+| --- | --- | --- | --- | --- |
+| [v0.4.0](https://github.com/esotericode/blink/releases/tag/v0.4.0) (Latest) | `efa982b` | 12,501,250 bytes | 487,486 bytes | `docs/releases/v0.4.0.md` |
+| [v0.3.0](https://github.com/esotericode/blink/releases/tag/v0.3.0) | `1384948` | 12,425,546 bytes | 408,848 bytes | `docs/releases/v0.3.0.md` |
+| [v0.2.0](https://github.com/esotericode/blink/releases/tag/v0.2.0) | `f401f32` | 12,353,096 bytes | 340,416 bytes | `docs/releases/v0.2.0.md` |
+
+Each release also carries `SHA256SUMS.txt` computed from its attached files.
+v0.1.0 (Linux only, before Windows packaging) has no release.
+
 ## 2026-10-06 — Observed OAM DMA, explanatory tooltips (0.4.0)
 
 | Check | Evidence / result |

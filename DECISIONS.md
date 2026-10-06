@@ -237,7 +237,7 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
 - The tag must match `project(... VERSION)` at that commit, so file names,
   About box, and tag agree. Notes live in the repository
   (`docs/releases/<tag>.md`) and are reviewed like code.
-- First releases: v0.2.0 (first Windows build), v0.3.0 (any ROM, banks), and
+- Published: v0.2.0 (first Windows build), v0.3.0 (any ROM, banks), and
   v0.4.0 (DMA, tooltips; latest), each built from the last commit of that version.
   v0.1.0 was Linux-only and predates the packaging the workflow expects, so
   it has no release. Older notes say they are superseded.
