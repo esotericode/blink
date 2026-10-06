@@ -105,6 +105,7 @@ private:
     CartridgePanel* cartridge_{};
     QDockWidget *systemDock_{}, *cpuDock_{}, *memoryDock_{}, *cartridgeDock_{}, *tilesDock_{}, *mapDock_{}, *writesDock_{}, *lessonDock_{};
     QLabel *badge_{}, *cursor_{}, *frameLabel_{}, *instruction_{}, *flags_{}, *writer_{}, *selection_{}, *window_{};
+    std::array<QLabel*, 4> flagChips_{};
     QLabel *activityLabel_{}, *traceStatus_{}, *lessonProgress_{}, *lessonHeading_{}, *lessonBody_{};
     QPushButton *lessonAction_{}, *lessonStop_{}, *lessonFollow_{};
     QTableWidget *registers_{}, *memory_{}, *writes_{};

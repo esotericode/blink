@@ -1,5 +1,7 @@
 #include "ui/cartridge_view.hpp"
 #include "ui/style.hpp"
+#include "ui/tooltip.hpp"
+#include "teaching/glossary.hpp"
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QFontMetricsF>
@@ -55,6 +57,7 @@ QString bankEffect(const WriteEvent& w, const CartridgeInfo& info) {
 BankMap::BankMap(QWidget* parent) : QWidget(parent) {
     setObjectName("bankMap");
     setMouseTracking(true);
+    tips::setCustom(this);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 void BankMap::setData(const CartridgeState& cartridge, const ActivityMap& activity) {
@@ -207,26 +210,33 @@ bool BankMap::event(QEvent* event) {
     const auto l = layout();
     const QPointF p = help->pos();
     QString text;
+    QRect area = rect();
     for (int bank = 0; bank < romBanks() && text.isEmpty(); ++bank) {
         if (!romCell(l, bank).contains(p)) continue;
         const auto count = bank < int(executions_.size()) ? executions_[std::size_t(bank)] : 0u;
-        text = QString("ROM bank %1\nFile offset %2–%3\n%4 opcode starts from this bank")
-            .arg(bank).arg(q(hex(std::uint64_t(bank) * 0x4000, 6)), q(hex(std::uint64_t(bank) * 0x4000 + 0x3FFF, 6))).arg(count);
-        if (bank == cartridge_.banks.rom) text += "\nMapped at $4000–$7FFF now (click to inspect)";
-        else if (bank == cartridge_.banks.rom0) text += "\nMapped at $0000–$3FFF now (click to inspect)";
-        else text += "\nNot mapped: the CPU cannot see this bank until the program selects it";
-        if (cartridge_.info.mbc == Mbc::Mmm01) text += "\nMMM01: emulator memory is rearranged; file offsets may differ";
+        QString body = QString("16 KiB of the cartridge, bytes %1–%2 of the ROM file. %3 instructions ran from it since the map was cleared.")
+            .arg(q(hex(std::uint64_t(bank) * 0x4000, 6)), q(hex(std::uint64_t(bank) * 0x4000 + 0x3FFF, 6))).arg(count);
+        QString hint;
+        if (bank == cartridge_.banks.rom) { body += " It is mapped at $4000–$7FFF right now."; hint = "Click to view it in the Memory panel."; }
+        else if (bank == cartridge_.banks.rom0) { body += " It is mapped at $0000–$3FFF right now."; hint = "Click to view it in the Memory panel."; }
+        else body += " Not mapped: the CPU can't see it until the program selects it.";
+        if (cartridge_.info.mbc == Mbc::Mmm01) body += " (MMM01 rearranges memory, so file offsets may differ.)";
+        text = tips::make(QString("ROM bank %1").arg(bank), body, hint);
+        area = romCell(l, bank).toAlignedRect();
     }
     for (int bank = 0; bank < ramBanks() && text.isEmpty(); ++bank) {
-        if (ramCell(l, bank).contains(p)) {
-            text = QString("Cartridge RAM bank %1%2").arg(bank).arg(bank == cartridge_.banks.ram ? "\nSelected for $A000–$BFFF" : "");
-        }
+        if (!ramCell(l, bank).contains(p)) continue;
+        text = tips::make(QString("Cartridge RAM bank %1").arg(bank),
+            q(glossary("cart.window.ram").body) + (bank == cartridge_.banks.ram ? " This bank is the one selected for $A000–$BFFF." : ""));
+        area = ramCell(l, bank).toAlignedRect();
     }
-    if (text.isEmpty() && l.rom0Window.contains(p)) text = "CPU addresses $0000–$3FFF. Click to inspect.";
-    if (text.isEmpty() && l.romWindow.contains(p)) text = "CPU addresses $4000–$7FFF: the switchable window. Click to inspect.";
-    if (text.isEmpty() && l.ramWindow.contains(p)) text = "CPU addresses $A000–$BFFF: cartridge RAM, when the cartridge has it and the program enables it.";
-    if (text.isEmpty() && bootExecutions_) text = QString("%1 boot-program opcodes are not counted in any bank").arg(bootExecutions_);
-    if (text.isEmpty()) QToolTip::hideText(); else QToolTip::showText(help->globalPos(), text, this);
+    if (text.isEmpty() && l.rom0Window.contains(p)) { text = tips::key("cart.window.rom0"); area = l.rom0Window.toAlignedRect(); }
+    if (text.isEmpty() && l.romWindow.contains(p)) { text = tips::key("cart.window.romx"); area = l.romWindow.toAlignedRect(); }
+    if (text.isEmpty() && l.ramWindow.contains(p)) { text = tips::key("cart.window.ram"); area = l.ramWindow.toAlignedRect(); }
+    if (text.isEmpty()) text = tips::make("Bank map",
+        "Left: the three address windows the CPU uses for the cartridge. Right: every bank on the cartridge. Lines show which "
+        "bank each window shows now." + (bootExecutions_ ? QString(" (%1 boot-program instructions are not counted in any bank.)").arg(bootExecutions_) : QString()));
+    tips::show(this, help->globalPos(), text, area);
     return true;
 }
 
@@ -235,6 +245,7 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(6, 6, 6, 6);
     facts_ = new QLabel; facts_->setObjectName("cartridgeFacts"); facts_->setWordWrap(true); facts_->setTextFormat(Qt::RichText);
+    facts_->setToolTip(tips::key("cart.facts"));
     root->addWidget(facts_);
     notes_ = new QLabel; notes_->setObjectName("cartridgeNotes"); notes_->setWordWrap(true);
     notes_->setStyleSheet(QString("color: %1;").arg(style::write.name()));
@@ -245,10 +256,11 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
     root->addWidget(explanation_);
     auto* row = new QHBoxLayout;
     stats_ = new QLabel; stats_->setObjectName("cartridgeStats"); stats_->setWordWrap(true);
+    stats_->setToolTip(tips::key("cart.stats"));
     row->addWidget(stats_, 1);
     run_ = new QPushButton("Run until the bank changes");
     run_->setObjectName("runUntilBankChangeButton");
-    run_->setToolTip("Run until a step ends with a different bank mapped (up to one emulated second), then pause there.");
+    run_->setToolTip(tips::key("cart.run"));
     row->addWidget(run_);
     root->addLayout(row);
     switches_ = new CompactTable(0, 4);
@@ -261,7 +273,12 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
     switches_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     switches_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     switches_->setFont(style::monospace());
-    switches_->setToolTip("Captured CPU writes to $0000–$7FFF, newest first. On a cartridge with an MBC these are commands, not ROM changes.");
+    switches_->setToolTip(tips::key("cart.switches"));
+    switches_->horizontalHeaderItem(0)->setToolTip(tips::key("writes.tick"));
+    switches_->horizontalHeaderItem(1)->setToolTip(tips::key("writes.instruction"));
+    switches_->horizontalHeaderItem(2)->setToolTip(tips::make("Controller write",
+        "The ROM address written and the value. The address range selects which controller register receives it."));
+    switches_->horizontalHeaderItem(3)->setToolTip(tips::make("Effect", "What changed in the bank mapping as a result."));
     root->addWidget(switches_, 2);
     connect(run_, &QPushButton::clicked, this, &CartridgePanel::runUntilBankChange);
     connect(map_, &BankMap::windowActivated, this, &CartridgePanel::addressActivated);
@@ -333,7 +350,9 @@ void CartridgePanel::setSnapshot(const Snapshot& s, const ActivityMap& activity)
             auto* item = switches_->item(r, col);
             if (!item) { item = new QTableWidgetItem; switches_->setItem(r, col, item); }
             item->setText(values[col]);
-            item->setToolTip(values[col]);
+            item->setToolTip(col == 2 && !name.empty() ? tips::make(q(name), QString("%1 was written to %2. ROM can't change, so the %3 chip "
+                                 "takes the write as a command.").arg(q(hex(w.requested, 2)), q(hex(w.address)), q(mbcName(info.mbc))), values[3])
+                                                       : values[col]);
             item->setForeground(col == 3 && values[3].contains("→") ? style::highlight : style::text);
         }
     }

@@ -1,8 +1,10 @@
 #pragma once
 #include "emulator/state.hpp"
 #include <QWidget>
+#include <QLineF>
 #include <map>
 #include <set>
+#include <vector>
 
 namespace observatory {
 // Functional schematic of the parts a button press travels through. Live labels
@@ -11,7 +13,7 @@ class SystemDiagram : public QWidget {
     Q_OBJECT
 public:
     enum class Block { Joypad, Cartridge, Cpu, Wram, Vram, Oam, Ppu, Lcd };
-    enum class Path { JoypadCpu, RomCpu, CpuWram, CpuOam, CpuVram, VramPpu, OamPpu, PpuLcd };
+    enum class Path { JoypadCpu, RomCpu, CpuWram, CpuOam, CpuVram, VramPpu, OamPpu, PpuLcd, WramOamDma };
     explicit SystemDiagram(QWidget* parent = nullptr);
     void setSnapshot(const Snapshot& snapshot);
     void setHighlight(std::set<Path> paths, std::set<Block> blocks);
@@ -23,8 +25,12 @@ signals:
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;
+    bool event(QEvent* event) override;
 private:
     std::map<Block, QRectF> layout() const;
+    // Straight arrows, shared by painting and hover hit-testing.
+    std::vector<std::pair<Path, QLineF>> arrows(const std::map<Block, QRectF>& r) const;
+    QRectF dmaArea(const std::map<Block, QRectF>& r) const;
     std::map<Block, QString> detail_;
     std::map<Path, QString> traffic_;
     std::set<Path> paths_;

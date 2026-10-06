@@ -54,6 +54,19 @@ and no commercial game is included.
   while it changes, when you open another game, and on exit (File › Save
   battery RAM now: Ctrl+S). The format is SameBoy's: raw RAM, plus a clock
   footer for MBC3/HuC3/TPP1 clocks.
+- **OAM DMA as a writer**: most commercial games build their sprite table in
+  work RAM and copy it into OAM with the hardware's DMA (writing a page number
+  to `$FF46`). The app records each request with the instruction that made it
+  and checks OAM against the source once the copy has finished. Select a
+  sprite byte and the writer panel says "OAM DMA from `$C100`…"; click the
+  source address to see which instruction put the value there. Run until
+  written (F9) on an OAM byte stops after the copy. The system overview shows
+  the copy as a WRAM → OAM arrow with a count.
+- **Explanatory tooltips** on everything: registers and flags, every memory
+  byte (its region, and for hardware registers what that register does),
+  each part and arrow of the system overview, banks, tiles down to a single
+  bit or pixel, panels (hover a tab or title bar), and every button. Written
+  for a curious newcomer: what it is, why it matters, how to use it.
 
 Panels dock, tab, float, and close; **View › Reset layout** restores them.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy
@@ -139,7 +152,7 @@ cmake --install build --prefix out\install
 cpack --config build\CPackConfig.cmake -B out
 ```
 
-This writes `out\console-observatory-0.3.0-windows-x64.zip` (about 12 MB). Installing runs
+This writes `out\console-observatory-0.4.0-windows-x64.zip` (about 12 MB). Installing runs
 `windeployqt` (through Qt's CMake deployment support), which copies the Qt
 DLLs, platform and style plugins, the MinGW runtime, and a `qt.conf` beside
 `console-observatory.exe`. Unzip anywhere and run the `.exe`; the target
@@ -188,7 +201,7 @@ The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 cmake --install build --prefix "$PWD/out/install"
 ./out/install/bin/console-observatory
 cpack --config build/CPackConfig.cmake -B out
-sudo apt install ./out/console-observatory_0.3.0_amd64.deb
+sudo apt install ./out/console-observatory_0.4.0_amd64.deb
 console-observatory
 ```
 
@@ -226,7 +239,7 @@ not verified yet. Build without verification executables with
   storage before/after. A callback reports an **attempt**, not acceptance.
 - The memory map counts CPU write attempts (while capture is on) and opcode
   starts per address since its last clear; loading, restarting, or toggling
-  capture clears it. Reads, DMA, and PPU fetches are not counted.
+  capture clears it. Reads, DMA copies, and PPU fetches are not counted.
 - Default history: 4,096 write records. `--trace-capacity 256` selects a smaller
   window (8–65,536). Evictions and incomplete earlier history are displayed.
   Turning capture off/on clears stale writer evidence. The newest 64 attempts
@@ -246,17 +259,22 @@ not verified yet. Build without verification executables with
   while disabled); clock registers are not shown as RAM. MMM01 rearranges ROM
   inside the emulator, so its file offsets are approximate.
 - Commercial-game compatibility is SameBoy's; this project has verified the
-  bundled cartridges and an MBC5 variant, not a commercial library. Most games
-  copy sprites with OAM DMA, which the CPU write hook does not see, so their
-  sprite writes show no last writer. Audio is emulated but not played.
-- No read trace, DMA/PPU transfer trace, exact write-cycle timestamp, reverse
+  bundled cartridges and an MBC5 variant, not a commercial library. Audio is
+  emulated but not played.
+- OAM DMA is observed, not traced byte by byte: SameBoy has no public DMA
+  hook, so the app records the CPU's `$FF46` write (with OAM copied just
+  before it) and compares OAM with the source 162 machine cycles later
+  (longer if the CPU halts, because SameBoy pauses DMA then), reporting how
+  many of the 160 bytes match. Needs Capture writes.
+- No read trace, PPU fetch trace, exact write-cycle timestamp, reverse
   execution, pixel provenance, gate model, or automatic complete causality.
   The system overview is a functional schematic, not a circuit diagram.
 
 ## Verification and next milestone
 
-Four CTest suites: engine behavior (eleven groups), rendered native Qt widgets,
-deterministic ROM generation, and vendored source integrity. The engine suite
+Five CTest suites: engine behavior (twelve groups), rendered native Qt widgets,
+deterministic ROM generation, vendored source integrity, and a check that every
+tooltip the interface uses exists in the glossary and stays short. The engine suite
 compares full SameBoy save-state bytes, registers, WRAM, VRAM, OAM, frame
 pixels, ticks, and opcode counts with tracing enabled/disabled; checks that
 run-until-write reaches the identical state as untraced stepping; verifies
@@ -265,9 +283,13 @@ colours; and checks inspection purity, bounded history, interrupt
 attribution, HALT, and step synchronization. Cartridge groups check the
 post-boot state, MBC1 and MBC5 switching with the writer evidence, banked
 disassembly and per-bank counts, cartridge RAM, battery save/restore, banked
-trace parity, and pure inspection with a bank mapped. The widget suite drives
-both lessons through their buttons, opens an MBC5 ROM by drag and drop with an
-existing `.sav`, and asserts the real state at every stop.
+trace parity, and pure inspection with a bank mapped. The DMA group checks the
+copy's timing against SameBoy itself (the last byte lands inside the checked
+window), OAM against the source, restarts, and tracing on/off parity. The widget
+suite drives both lessons through their buttons, opens an MBC5 ROM by drag and
+drop with an existing `.sav`, follows a DMA-written sprite byte back to its
+source, hovers real controls for their tooltips, and asserts the real state at
+every stop.
 
 Linux: passed offscreen and under X11 (local and GitHub Actions). Windows:
 GitHub Actions builds with official Qt 6.8.3 MinGW, runs all suites, the
@@ -278,8 +300,7 @@ unverified. See `docs/VERIFICATION.md` for exact evidence.
 
 Next useful milestone: an interrupt/timer timeline lesson (VBlank, STAT, timer)
 using real interrupt-flag and execution events, and a background-map view
-linking map entries to tiles. Add verified DMA instrumentation before lessons
-for DMA-based games.
+linking map entries to tiles.
 
 Read `PROJECT_GUIDE.md`, `AGENTS.md`, `STATUS.md`, `DECISIONS.md`, and
 `docs/TRACE_CONTRACT.md` before contributing. Third-party licenses and exact

@@ -29,6 +29,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent*) override;
+    bool event(QEvent* event) override;
 private:
     struct Geometry { QRect overview, detail; int cell; };
     Geometry geometry() const;

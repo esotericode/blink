@@ -5,6 +5,7 @@ namespace observatory::style {
 QString stylesheet() {
     return R"(
         QMainWindow, QWidget { background: #111b24; color: #dce4ea; }
+        QToolTip { color: #dce4ea; background-color: #121d26; border: 1px solid #3a5162; padding: 6px; }
         QMainWindow::separator { background: #283944; width: 5px; height: 5px; }
         QMenuBar { background: #0d151c; border-bottom: 1px solid #34424e; }
         QMenuBar::item { padding: 5px 10px; background: transparent; }

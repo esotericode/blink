@@ -52,6 +52,7 @@ signals:
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;
+    bool event(QEvent* event) override;
 private:
     struct Layout { int bit, pixel, rowsTop, rowHeight, lowHexX, lowX, highHexX, highX, pixelX; };
     Layout layout() const;
@@ -81,7 +82,7 @@ private:
     QButtonGroup* blocks_{};
     TileSheet* sheet_{};
     TileDetail* detail_{};
-    QLabel* caption_{};
+    QLabel *caption_{}, *oamSource_{};
     VideoState video_;
     int sprite_ = -1;
     bool haveData_ = false;

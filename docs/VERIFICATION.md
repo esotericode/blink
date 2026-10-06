@@ -3,6 +3,17 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Observed OAM DMA, explanatory tooltips (0.4.0)
+
+| Check | Evidence / result |
+| --- | --- |
+| Build | Clean Release build on Linux; no warnings from project code (one GCC dangling-reference false positive fixed by copying the glossary entry). |
+| CTest | **5/5**: engine, widgets offscreen, ROM reproducibility, vendor integrity, and the new glossary key check (88 entries, 85 keys used by the interface, all present, longest explanation 218 characters). |
+| Engine | **Twelve groups**. New OAM DMA group on an original HRAM-routine fixture: the `$FF46` write is captured from `$FF82`; while copying, the snapshot publishes the pending record with OAM "before"; stepping one instruction at a time, SameBoy's last OAM byte arrives more than 1,200 and at most 1,296 ticks after the requesting step (inside the checked window); the check lands 1,296–1,359 ticks after it with 160/160 bytes equal to the source and OAM = 0…159; changed-byte count matches; run-until-written on `$FE01` stops at the next frame's checked copy (sprite 0 X 1 → 2, one byte changed); a double request records `Restarted` then `Checked`; 12 frames of per-frame DMA give identical full save state with tracing on and off, and no records with capture off. |
+| Widgets | DMA fixture loaded from a file: F9 on `$FE01` stops at the first and second copies; writer text names OAM DMA, 160 of 160, and links `$C101`; following the link selects `$C101`, whose writer is `INC [HL]`; the Sprites panel's OAM source line names `$C100`; the `$FF46` row says "starts OAM DMA from $C100". Tooltips on real controls: the PC register cell, the Z flag chip, the CPU part of the system overview, a memory byte (`$C000 player_x`, WRAM, value), the Cartridge dock tab, the Run toolbar button, the bank map's fixed window, and one pixel of the tile detail ("colour number"); the card is at most 400 px wide and hides on request. |
+| X11 | Widget suite under `xvfb-run` (1600×1000 screen) with screen grabs of tooltip cards: register, diagram part, memory byte (with hint footer), tile pixel. Found and fixed: dock tabs carry Qt's own title tooltip, which hid the panel explanation; the diagram's DMA label was clipped by the PPU box (moved into the OAM box). The soft (translucent) style shows black margins without a compositor, so X11 defaults to the flat style. |
+| Windows (Wine 9.0) | MinGW cross build: engine suite (twelve groups, including the DMA timing check) and widget suite (including tooltips) pass with the native `windows` plugin. Wine's screen grab did not show the translucent card; a flat-style run checks whether that is Wine's missing compositor (result below). |
+
 ## 2026-10-06 — Any cartridge, bank visualisation (0.3.0)
 
 ### Linux (reference: Ubuntu 24.04, GCC 13.3.0, Qt 6.4.2)

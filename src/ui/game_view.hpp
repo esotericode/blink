@@ -27,8 +27,10 @@ signals:
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* event) override;
+    bool event(QEvent* event) override;
 private:
     QRectF screenRect() const;
+    const Sprite* spriteAt(QPointF point) const;
     QImage image_, changes_;
     std::vector<Sprite> sprites_;
     int spriteHeight_ = 8, selected_ = -1, changed_ = 0;

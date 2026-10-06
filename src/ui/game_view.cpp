@@ -1,5 +1,7 @@
 #include "ui/game_view.hpp"
 #include "ui/style.hpp"
+#include "ui/tooltip.hpp"
+#include <QHelpEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <algorithm>
@@ -10,7 +12,7 @@ GameView::GameView(QWidget* parent) : QWidget(parent) {
     setObjectName("gameView");
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(160, 144);
-    setToolTip("Arrow keys move the star. F5 runs or pauses; F10 steps an instruction; F11 advances to the next completed output. Click a sprite outline to inspect it.");
+    tips::setCustom(this);
 }
 void GameView::setFrame(const Snapshot& snapshot) {
     image_ = QImage(reinterpret_cast<const uchar*>(snapshot.pixels.data()), 160, 144,
@@ -75,18 +77,36 @@ void GameView::paintEvent(QPaintEvent*) {
         }
     }
 }
-void GameView::mousePressEvent(QMouseEvent* event) {
-    setFocus();
+const Sprite* GameView::spriteAt(QPointF p) const {
     const auto target = screenRect();
     const double unit = target.width() / 160.0;
-    const auto p = event->position();
     const double x = (p.x() - target.x()) / unit, y = (p.y() - target.y()) / unit;
     for (const auto& s : sprites_) {
-        if (x >= s.screenX() - 1 && x < s.screenX() + 9 && y >= s.screenY() - 1 && y < s.screenY() + spriteHeight_ + 1) {
-            emit spriteClicked(s.index);
-            return;
-        }
+        if (x >= s.screenX() - 1 && x < s.screenX() + 9 && y >= s.screenY() - 1 && y < s.screenY() + spriteHeight_ + 1) return &s;
     }
+    return nullptr;
+}
+void GameView::mousePressEvent(QMouseEvent* event) {
+    setFocus();
+    if (const auto* s = spriteAt(event->position())) { emit spriteClicked(s->index); return; }
     QWidget::mousePressEvent(event);
+}
+bool GameView::event(QEvent* event) {
+    if (event->type() != QEvent::ToolTip) return QWidget::event(event);
+    auto* help = static_cast<QHelpEvent*>(event);
+    const auto* s = showSprites_ ? spriteAt(help->pos()) : nullptr;
+    if (!s) {
+        tips::show(this, help->globalPos(), tips::key("ui.game"), rect());
+        return true;
+    }
+    const auto target = screenRect();
+    const double unit = target.width() / 160.0;
+    const QRect box = QRectF(target.x() + s->screenX() * unit, target.y() + s->screenY() * unit, 8 * unit, spriteHeight_ * unit)
+                          .toAlignedRect().adjusted(-3, -3, 3, 3);
+    tips::show(this, help->globalPos(), tips::make(QString("Sprite %1 · OAM %2").arg(s->index).arg(style::q(hex(std::uint16_t(0xFE00 + s->index * 4)))),
+        QString("Where the sprite table says this sprite is now: x = %1, y = %2, showing tile %3. The outline can run ahead of the "
+                "picture, which only updates when a frame finishes.").arg(s->screenX()).arg(s->screenY()).arg(s->tile),
+        "Click to open it in Sprites and tiles."), box);
+    return true;
 }
 }

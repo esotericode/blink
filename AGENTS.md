@@ -44,7 +44,14 @@ Build a standalone native desktop application that connects a running game's beh
   The RAM-enable latch is not public: label cartridge RAM as storage.
 - Keep `Snapshot` small on the stack (frames are heap vectors): MinGW's main
   thread has 2 MiB, and a 190 KB snapshot overflowed it under Windows.
-- Run the four CTest suites after emulator/observation changes. Run
+- OAM DMA is observed (request from the `$FF46` write, OAM checked against the
+  source after 162 M-cycles plus halted time), never claimed byte by byte.
+- Tooltips: put explanations in `src/teaching/glossary.cpp` and reference them
+  with `tips::key("…")`; custom-painted widgets call `tips::show()` with the
+  hovered region. `tests/glossary_tests.py` fails on an unknown key or an
+  explanation over 380 characters. Write for a smart newcomer; no unexplained
+  jargon, and no claims the emulator state does not support.
+- Run the CTest suites after emulator/observation changes. Run
   `xvfb-run -a ./build/widget_tests` for native X11 UI changes; offscreen tests
   alone do not establish compositor behavior. Inspect rendered layouts:
   `widget_tests desktop.png minimum.png <dir>` also saves every lesson stage
@@ -63,9 +70,9 @@ Build a standalone native desktop application that connects a running game's beh
 - Implemented: the pause-on-write movement lesson, sprite/tile bit-plane
   inspector, memory activity map, system overview, loading any
   SameBoy-supported cartridge with battery `.sav` files, the Cartridge/bank
-  panel, and the bank-switching demo and lesson. Next: an observed OAM DMA
-  record (from the captured `$FF46` write), then an interrupt and timer lesson
-  and a background-map view. Replay, save states, CGB mode, DMA tracing,
+  panel, the bank-switching demo and lesson, observed OAM DMA records, and
+  explanatory tooltips. Next: an interrupt and timer lesson and a
+  background-map view. Replay, save states, CGB mode, per-byte DMA tracing,
   audio playback, and macOS are not implemented; commercial-game
   compatibility is SameBoy's and not surveyed here.
 

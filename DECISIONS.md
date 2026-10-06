@@ -184,3 +184,40 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   in "who wrote this". The CPU's write to `$FF46` is already captured, so an
   honest "OAM copied by DMA from page $xx, requested at …" record is a small,
   verifiable step and is proposed ahead of the interrupt/timer lesson.
+
+## 2026-10-06 — OAM DMA made visible; explanatory tooltips
+
+- Real games fill OAM with DMA, so "who wrote this sprite byte?" had no answer.
+  SameBoy keeps DMA state internal (`GB_is_dma_active` is not public), and
+  vendored files stay unmodified, so DMA is *observed*: the write hook already
+  sees the CPU's `$FF46` write; at that moment OAM is copied as "before". The
+  completion check waits 162 machine cycles after the requesting step, the
+  duration read from `GB_dma_run` (warm-up, 160 copies, closing cycle), and
+  longer across steps without an opcode, because SameBoy pauses DMA while the
+  CPU is halted. A test steps one instruction at a time and confirms SameBoy's
+  last OAM byte lands inside that window; tracing on/off parity holds.
+- The record reports how many OAM bytes equal their source at the check rather
+  than claiming a per-byte transfer, and a restarted copy is labelled as such.
+  The UI makes the DMA OAM's last writer only when it is newer than the last
+  captured CPU store, and links the source byte so the chain sprite ← DMA ←
+  shadow table ← CPU store can be followed by clicking.
+- A hand-assembled fixture (`tests/fixtures.hpp`) uses the standard pattern —
+  routine copied to HRAM, `LDH [$46], A`, busy-wait — because on DMG the CPU
+  cannot fetch from ROM during the copy. No new bundled ROM was needed.
+- Tooltips: Qt's plain tooltip cannot show a structured explanation, and its
+  stylesheet cannot round or shadow it reliably. An application event filter
+  answers every tooltip request (static tooltips, item-view items, headers,
+  menu actions, dock tabs and title bars) with one card: an accent-coloured
+  title, the explanation, and a hint in a footer band. Custom-painted views
+  answer for the region under the pointer (a diagram part or arrow, a bank, a
+  tile, one bit or pixel of a tile row, a memory-map cell). After one tip, moving
+  to something else explains it immediately, as Qt's own tooltips do.
+- The card is translucent with a soft shadow on Windows, Wayland and macOS,
+  which always composite; on X11 (which may not) it is opaque with a rounded
+  mask. `OBSERVATORY_TOOLTIPS=flat|soft` overrides the choice.
+- Text lives in a Qt-free glossary (`src/teaching/glossary.*`), so wording is
+  reviewed in one place and kept consistent; a CTest suite rejects unknown keys
+  and over-long entries. Facts follow Pan Docs; writing aimed at a smart
+  newcomer (each term explained where it is used). Review corrected two drafts
+  (instructions per frame, sprite overlap priority) before publishing.
+- Version 0.4.0.

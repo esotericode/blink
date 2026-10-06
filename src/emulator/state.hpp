@@ -45,6 +45,33 @@ struct WriteEvent {
 struct Activity {
     std::uint64_t startTicks{}, endTicks{}, instructions{};
     std::array<std::uint64_t, 5> writes{}; // ROM/cart, VRAM, WRAM, OAM, IO/HRAM
+    std::uint64_t dmaTransfers{};          // OAM DMA copies checked in the interval
+};
+inline constexpr std::size_t oamBytes = 160;
+// OAM DMA: writing $XX to $FF46 makes the hardware copy $XX00-$XX9F into OAM
+// ($FE00-$FE9F), one byte per machine cycle, while the CPU keeps running. The
+// copy is not a CPU write, so the write hook never sees it. A DmaTransfer is
+// the observed request (the CPU write to $FF46) plus a check of OAM against
+// the source made once the copy must have finished. Recorded only while
+// capture is on.
+struct DmaTransfer {
+    enum class Status { Copying, Checked, Restarted };
+    std::uint64_t id{}, requestStartTicks{}, requestEndTicks{}, checkedTicks{};
+    std::optional<Instruction> instruction; // the instruction that wrote $FF46
+    std::uint8_t page{};                    // source page: copies page*$100 + 0..$9F
+    Status status = Status::Copying;        // Restarted: a new request came first
+    std::array<std::uint8_t, oamBytes> before{}, after{}; // OAM at the request / at the check
+    int matching{};                         // OAM bytes equal to their source byte at the check
+    // Address the hardware reads for OAM byte i (on DMG, $E000+ reads WRAM).
+    std::uint16_t sourceOf(std::size_t i) const {
+        const auto a = std::uint16_t(page << 8 | i);
+        return a >= 0xE000 ? std::uint16_t(a & ~0x2000) : a;
+    }
+    int changed() const {
+        int n = 0;
+        for (std::size_t i = 0; i < oamBytes; ++i) n += before[i] != after[i];
+        return n;
+    }
 };
 // Cartridge header facts plus the live mapping at the shared cursor.
 struct CartridgeState {
@@ -83,6 +110,8 @@ struct Snapshot {
     std::vector<std::uint32_t> previousPixels = std::vector<std::uint32_t>(screenPixels);
     std::uint64_t previousFrame{};
     std::vector<WriteEvent> writes;
+    std::vector<DmaTransfer> dma;            // finished OAM DMA records, newest last
+    std::optional<DmaTransfer> dmaCopying;   // requested, not yet checked
     Activity activity;
 };
 // Per-address counts over [startTicks, endTicks]. Writes are CPU write attempts by
@@ -98,9 +127,10 @@ struct ActivityMap {
     std::uint64_t romBankChanges{}, ramBankChanges{};
 };
 struct WatchResult {
-    enum class Stop { Write, BankChange, Limit, CaptureOff };
+    enum class Stop { Write, Dma, BankChange, Limit, CaptureOff };
     Stop stop = Stop::Limit;
     std::optional<WriteEvent> write; // First matching attempt in the stopping step.
+    std::optional<DmaTransfer> dma;  // For Dma: the OAM copy checked in the stopping step.
     std::uint64_t advancedTicks{}, instructions{}, frames{};
     BankMapping banksBefore, banksAfter; // For BankChange: the mapping across the stopping step.
 };

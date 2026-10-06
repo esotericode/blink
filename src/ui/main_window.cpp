@@ -7,6 +7,8 @@
 #include "ui/style.hpp"
 #include "ui/system_diagram.hpp"
 #include "ui/tile_view.hpp"
+#include "ui/tooltip.hpp"
+#include "teaching/glossary.hpp"
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
@@ -91,6 +93,17 @@ std::optional<QString> droppedFile(const QMimeData* mime) {
     if (!mime || !mime->hasUrls() || mime->urls().size() != 1 || !mime->urls().front().isLocalFile()) return {};
     return mime->urls().front().toLocalFile();
 }
+// Tooltip for one memory byte: address and name, its region, a register's job, its value.
+QString byteTip(std::uint16_t a, const QString& label, std::uint8_t value, bool available, bool changed) {
+    const auto region = regionExplanation(a);
+    const auto io = ioRegisterExplanation(a);
+    QString body = q(io.empty() ? region.body : io.body);
+    if (!io.empty()) body += "\n\n" + q(region.title) + ".";
+    QString hint = available ? QString("Value %1 = %2 in decimal%3. Click to select; F9 runs until it is written.")
+                                   .arg(q(hex(value, 2))).arg(value).arg(changed ? ", changed since the last snapshot (gold)" : "")
+                             : QString("No memory here, so there is no value to show.");
+    return tips::make(label + " · " + q(io.empty() ? region.title : io.title), body, hint);
+}
 QString flagChip(const char* name, bool set) {
     return QString("<span style='background-color:%1; color:%2'>&nbsp;%3&nbsp;%4&nbsp;</span>")
         .arg(set ? "#2c6b5c" : "#243441", set ? "#e9fff6" : "#93a6b4", name, set ? "1" : "0");
@@ -109,6 +122,7 @@ MainWindow::MainWindow(std::size_t traceCapacity) : engine_(traceCapacity) {
         }
     }
     setStyleSheet(style::stylesheet());
+    tips::install();
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AllowNestedDocks);
     setAcceptDrops(true);
     setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
@@ -140,37 +154,41 @@ void MainWindow::buildActions() {
         return a;
     };
     runAction_ = action("Run · F5", "runAction", Qt::Key_F5, [this] { running_ ? pause() : run(); });
+    runAction_->setToolTip(tips::key("action.run"));
     stepAction_ = action("Instruction · F10", "instructionAction", Qt::Key_F10, [this] { instructionStep(); });
-    stepAction_->setToolTip("Execute exactly one more opcode (after any interrupt service or wait).");
+    stepAction_->setToolTip(tips::key("action.step"));
     frameAction_ = action("Frame · F11", "frameAction", Qt::Key_F11, [this] { frameStep(); });
-    frameAction_->setToolTip("Run until the PPU completes its next output.");
+    frameAction_->setToolTip(tips::key("action.frame"));
     untilAction_ = action("Until written · F9", "untilWrittenAction", Qt::Key_F9, [this] { runUntilWritten(selectedAddress_); });
-    untilAction_->setToolTip("Run until the CPU writes the selected memory byte (up to one emulated second).");
+    untilAction_->setToolTip(tips::key("action.until"));
     auto* restartAction = action("Restart", "restartAction", QKeySequence("Ctrl+R"), [this] { restart(); });
+    restartAction->setToolTip(tips::key("action.restart"));
     traceAction_ = action("Capture writes", "traceAction", {}, [this](bool on) {
         engine_.setTraceEnabled(on); selectedEvent_.reset(); refresh();
     });
     traceAction_->setCheckable(true);
     traceAction_->setChecked(true);
-    traceAction_->setToolTip("Record CPU write attempts (needed for writer evidence and Until written). Toggling clears old evidence.");
+    traceAction_->setToolTip(tips::key("action.capture"));
     spritesAction_ = action("Sprite outlines", "spriteOverlayAction", {}, [this](bool on) { game_->setShowSprites(on); });
     spritesAction_->setCheckable(true);
-    spritesAction_->setToolTip("Outline sprites where OAM places them now, at the CPU cursor. The picture may be older.");
+    spritesAction_->setToolTip(tips::key("action.sprites"));
     changesAction_ = action("Changed pixels", "changesOverlayAction", {}, [this](bool on) { game_->setShowChanges(on); });
     changesAction_->setCheckable(true);
-    changesAction_->setToolTip("Mark pixels that differ between the two most recent completed outputs.");
+    changesAction_->setToolTip(tips::key("action.changes"));
     auto* open = action("Open ROM…", "openAction", QKeySequence::Open, [this] {
         pause();
         auto file = QFileDialog::getOpenFileName(this, "Open a Game Boy ROM", {}, romFilter());
         if (!file.isEmpty()) loadFile(file);
     });
-    open->setToolTip("Any Game Boy cartridge image up to 8 MiB. You can also drop a ROM file on the window.");
+    open->setToolTip(tips::key("action.open"));
     auto* teaching = action("Teaching game (button press lesson)", "teachingAction", {}, [this] { loadTeaching(); });
     auto* bankDemo = action("Bank-switching demo (MBC1)", "bankDemoAction", {}, [this] { loadBankDemo(); });
+    teaching->setToolTip(tips::key("action.teaching"));
+    bankDemo->setToolTip(tips::key("action.bankdemo"));
     saveBatteryAction_ = action("Save battery RAM now", "saveBatteryAction", QKeySequence("Ctrl+S"), [this] {
         if (saveBattery()) statusBar()->showMessage("Saved battery-backed cartridge RAM to " + QDir::toNativeSeparators(savePath_), 6000);
     });
-    saveBatteryAction_->setToolTip("Battery RAM is also saved automatically every few seconds while it changes, and on exit.");
+    saveBatteryAction_->setToolTip(tips::key("action.savebattery"));
     auto* quit = action("Quit", "quitAction", QKeySequence::Quit, [this] { close(); });
 
     auto* file = menuBar()->addMenu("&File");
@@ -185,6 +203,7 @@ void MainWindow::buildActions() {
     for (auto* a : {runAction_, stepAction_, frameAction_, untilAction_}) emulation->addAction(a);
     emulation->addSeparator(); emulation->addAction(traceAction_);
     emulation->addAction(action("Clear memory map", "clearMapAction", {}, [this] { engine_.clearActivityMap(); updatePanels(true); }));
+    emulation->actions().back()->setToolTip(tips::key("action.clearmap"));
     viewMenu_ = menuBar()->addMenu("&View");
     auto* help = menuBar()->addMenu("&Help");
     help->addAction(action("Lesson: follow one press of Right", "lessonMenuAction", Qt::Key_F1, [this] {
@@ -211,10 +230,10 @@ void MainWindow::buildActions() {
     auto* spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolbar->addWidget(spacer);
     badge_ = new QLabel; badge_->setObjectName("stateBadge");
+    badge_->setToolTip(tips::key("ui.badge"));
     toolbar->addWidget(badge_);
     cursor_ = new QLabel; cursor_->setObjectName("cursorLabel");
-    cursor_->setToolTip("The shared cursor: every state panel shows the machine at this instruction boundary.\n"
-                        "Ticks count 1/8,388,608 s since reset (SameBoy's unit; 2 ticks per CPU clock).");
+    cursor_->setToolTip(tips::key("ui.cursor"));
     toolbar->addWidget(cursor_);
 }
 
@@ -233,8 +252,7 @@ void MainWindow::buildCentral() {
     layout->addLayout(overlays);
     frameLabel_ = label({}, "frameLabel");
     frameLabel_->setWordWrap(false);
-    frameLabel_->setToolTip("The picture is the latest completed output. It changes only when the PPU completes another one,\n"
-                            "so it can be older than the CPU cursor while you step instructions.");
+    frameLabel_->setToolTip(tips::key("ui.frame"));
     layout->addWidget(frameLabel_);
     setCentralWidget(central);
     connect(game_, &GameView::spriteClicked, this, [this](int index) {
@@ -246,6 +264,9 @@ void MainWindow::buildCentral() {
 QDockWidget* MainWindow::makeDock(const QString& title, const QString& name, QWidget* content) {
     auto* dock = new QDockWidget(title, this);
     dock->setObjectName(name);
+    // Explains the panel from its title bar and its tab ("systemDock" -> "panel.system").
+    auto key = name; key.chop(4);
+    dock->setProperty("panelTip", tips::key("panel." + key.toStdString()));
     dock->setWidget(content);
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     viewMenu_->addAction(dock->toggleViewAction());
@@ -277,12 +298,35 @@ void MainWindow::buildDocks() {
     registers_->setFixedHeight(56);
     registers_->setSelectionMode(QAbstractItemView::NoSelection);
     registers_->verticalHeader()->setDefaultSectionSize(26);
+    {
+        const char* keys[] = {"reg.af", "reg.bc", "reg.de", "reg.hl", "reg.sp", "reg.pc"};
+        for (int c = 0; c < 6; ++c) {
+            registers_->horizontalHeaderItem(c)->setToolTip(tips::key(keys[c]));
+            auto* item = new QTableWidgetItem;
+            item->setToolTip(tips::key(keys[c]));
+            registers_->setItem(0, c, item);
+        }
+    }
     cpuLayout->addWidget(registers_);
-    flags_ = label({}, "flagsLabel");
-    flags_->setTextFormat(Qt::RichText);
-    cpuLayout->addWidget(flags_);
+    auto* flagRow = new QHBoxLayout;
+    flagRow->setSpacing(4);
+    flagRow->addWidget(new QLabel("Flags"));
+    const char* flagKeys[] = {"flag.z", "flag.n", "flag.h", "flag.c"};
+    for (int i = 0; i < 4; ++i) {
+        flagChips_[std::size_t(i)] = new QLabel;
+        flagChips_[std::size_t(i)]->setObjectName(QString("flag%1").arg(QChar("ZNHC"[i])));
+        flagChips_[std::size_t(i)]->setTextFormat(Qt::RichText);
+        flagChips_[std::size_t(i)]->setToolTip(tips::key(flagKeys[i]));
+        flagRow->addWidget(flagChips_[std::size_t(i)]);
+    }
+    flags_ = new QLabel; flags_->setObjectName("flagsLabel");
+    flags_->setToolTip(tips::make("A · the accumulator", q(glossary("reg.af").body)));
+    flagRow->addWidget(flags_);
+    flagRow->addStretch();
+    cpuLayout->addLayout(flagRow);
     instruction_ = label({}, "instructionLabel");
     instruction_->setFont(style::monospace());
+    instruction_->setToolTip(tips::key("cpu.instruction"));
     cpuLayout->addWidget(instruction_);
     cpuLayout->addStretch();
     cpuDock_ = makeDock("CPU · instruction boundary", "cpuDock", cpu);
@@ -293,6 +337,7 @@ void MainWindow::buildDocks() {
     auto* choices = new QHBoxLayout;
     region_ = new QComboBox;
     region_->setObjectName("memoryRegion");
+    region_->setToolTip(tips::key("memory.region"));
     region_->addItem("WRAM · variables", 0xC000); region_->addItem("OAM · sprites", 0xFE00);
     region_->addItem("VRAM · tiles", 0x8000); region_->addItem("VRAM · tile map", 0x9800);
     region_->addItem("IO registers", 0xFF00); region_->addItem("HRAM · high RAM", 0xFF80);
@@ -300,7 +345,7 @@ void MainWindow::buildDocks() {
     region_->addItem("Cartridge RAM", 0xA000);
     choices->addWidget(region_);
     address_ = new QLineEdit("C000"); address_->setObjectName("memoryAddress"); address_->setMaximumWidth(80);
-    address_->setMaxLength(5); address_->setToolTip("Hexadecimal address; press Enter to inspect.");
+    address_->setMaxLength(5); address_->setToolTip(tips::key("memory.address"));
     choices->addWidget(address_);
     auto* until = new QPushButton("Run until written · F9");
     until->setObjectName("runUntilWrittenButton");
@@ -310,6 +355,7 @@ void MainWindow::buildDocks() {
     choices->addWidget(until);
     memLayout->addLayout(choices);
     window_ = label({}, "memoryWindowLabel");
+    window_->setToolTip(tips::key("memory.window"));
     window_->setStyleSheet(QString("color: %1;").arg(style::muted.name()));
     memLayout->addWidget(window_);
     connect(region_, qOverload<int>(&QComboBox::activated), this, [this](int index) { setMemoryBase(std::uint16_t(region_->itemData(index).toUInt())); });
@@ -324,11 +370,18 @@ void MainWindow::buildDocks() {
     memory_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     memory_->verticalHeader()->setDefaultSectionSize(22);
     memLayout->addWidget(memory_, 1);
-    memory_->setToolTip("Gold + Δ: changed since the previous snapshot. IO: raw core storage, not a CPU bus read. —: no storage.\n"
-                        "Click a byte to see its last captured writer; F9 runs until it is written.");
+    memory_->setToolTip(tips::key("panel.memory"));
     selection_ = label({}, "selectionLabel");
+    selection_->setToolTip(tips::key("memory.selection"));
     memLayout->addWidget(selection_);
     writer_ = label({}, "writerLabel");
+    writer_->setTextFormat(Qt::RichText);
+    writer_->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    connect(writer_, &QLabel::linkActivated, this, [this](const QString& link) {
+        bool ok = false;
+        const auto a = link.startsWith("addr:") ? link.mid(5).toUInt(&ok, 16) : 0u;
+        if (ok && a <= 0xFFFF) { selectedEvent_.reset(); selectAddress(std::uint16_t(a)); }
+    });
     memLayout->addWidget(writer_);
     connect(memory_, &QTableWidget::cellClicked, this, [this](int row, int column) {
         if (column == 0) return;
@@ -370,9 +423,15 @@ void MainWindow::buildDocks() {
     auto* traceLayout = new QVBoxLayout(trace);
     traceLayout->setContentsMargins(6, 6, 6, 6);
     traceStatus_ = label({}, "traceStatusLabel");
+    traceStatus_->setToolTip(tips::key("writes.status"));
     traceLayout->addWidget(traceStatus_);
     writes_ = table(0, 4, {"Tick end", "Instruction", "Address / name", "Before → after / effect"});
     writes_->setObjectName("writeTable");
+    {
+        const char* keys[] = {"writes.tick", "writes.instruction", "writes.address", "writes.values"};
+        for (int c = 0; c < 4; ++c) writes_->horizontalHeaderItem(c)->setToolTip(tips::key(keys[c]));
+    }
+    writes_->setToolTip(tips::key("panel.writes"));
     writes_->setSelectionBehavior(QAbstractItemView::SelectRows);
     writes_->verticalHeader()->setDefaultSectionSize(23);
     writes_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -413,13 +472,13 @@ void MainWindow::buildDocks() {
     connect(lessonAction_, &QPushButton::clicked, this, [this] { advanceLesson(); });
     buttons->addWidget(lessonAction_);
     lessonStop_ = new QPushButton("Stop"); lessonStop_->setObjectName("lessonStop");
-    lessonStop_->setToolTip("Stop the lesson and release the simulated Right press.");
+    lessonStop_->setToolTip(tips::key("lesson.stop"));
     connect(lessonStop_, &QPushButton::clicked, this, [this] { stopLesson(); });
     buttons->addWidget(lessonStop_);
     buttons->addStretch();
     lessonFollow_ = new QPushButton("Inspect player_x");
     lessonFollow_->setObjectName("inspectMovementButton");
-    lessonFollow_->setToolTip("Select player_x ($C000) in the Memory panel and show its last captured writer.");
+    lessonFollow_->setToolTip(tips::key("lesson.follow"));
     connect(lessonFollow_, &QPushButton::clicked, this, [this] { inspectMovement(); });
     buttons->addWidget(lessonFollow_);
     lessonLayout->addLayout(buttons);
@@ -431,10 +490,12 @@ void MainWindow::buildDocks() {
     viewMenu_->addSeparator();
     auto* layoutAction = new QAction("Reset layout", this);
     layoutAction->setObjectName("resetLayoutAction");
+    layoutAction->setToolTip(tips::key("action.resetlayout"));
     connect(layoutAction, &QAction::triggered, this, [this] { resetLayout(); });
     viewMenu_->addAction(layoutAction);
 
     activityLabel_ = new QLabel; activityLabel_->setObjectName("activityLabel");
+    activityLabel_->setToolTip(tips::key("ui.activity"));
     statusBar()->addPermanentWidget(activityLabel_);
 }
 
@@ -524,6 +585,12 @@ WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
     const auto where = romLabel(address);
     if (result.stop == WatchResult::Stop::CaptureOff) {
         statusBar()->showMessage("Turn on Capture writes to stop on a write.", 6000);
+    } else if (result.stop == WatchResult::Stop::Dma) {
+        const auto& d = *result.dma;
+        statusBar()->showMessage(QString("Stopped after an OAM DMA copy of %1–%2 filled OAM, including %3 (requested by %4; %5 instructions, %6 frames later).")
+            .arg(q(hex(d.sourceOf(0))), q(hex(d.sourceOf(oamBytes - 1))), where,
+                 d.instruction ? q(hex(d.instruction->pc)) + " " + q(disassemble(*d.instruction)) : QString("an unrecorded instruction"))
+            .arg(result.instructions).arg(result.frames), 10000);
     } else if (result.stop == WatchResult::Stop::Write) {
         const auto& w = *result.write;
         statusBar()->showMessage(QString("Stopped after the write to %1 by %2 (%3 instructions, %4 frames later).")
@@ -730,8 +797,8 @@ void MainWindow::setLessonStep(LessonStep step, const LessonEvidence& evidence, 
     lessonStop_->setVisible(step != LessonStep::Start && step != LessonStep::NeedsTeachingRom && step != LessonStep::Done &&
                             step != LessonStep::BankDemo);
     lessonFollow_->setVisible(snapshot_.teaching);
-    lessonStop_->setToolTip(step == LessonStep::BankSwitched ? "Stop and show the bank demo's introduction again."
-                                                             : "Stop the lesson and release the simulated Right press.");
+    lessonStop_->setToolTip(step == LessonStep::BankSwitched ? tips::make("Stop", "Go back to the bank demo's introduction.")
+                                                             : tips::key("lesson.stop"));
     using B = SystemDiagram::Block; using P = SystemDiagram::Path;
     if (step == LessonStep::BankDemo || step == LessonStep::BankSwitched || step == LessonStep::NeedsTeachingRom) {
         lessonProgress_->setText(QString("<span style='color:%1'>%2</span>").arg(style::muted.name(),
@@ -873,8 +940,9 @@ void MainWindow::refresh() {
         cell(registers_, 0, i, q(hex(values[i])) + (changed ? " Δ" : ""), changed);
     }
     const auto f = s.registers.af;
-    flags_->setText("Flags " + flagChip("Z", f & 0x80) + " " + flagChip("N", f & 0x40) + " " + flagChip("H", f & 0x20) + " " + flagChip("C", f & 0x10) +
-                    QString("&nbsp;&nbsp; A = %1 (%2)").arg(q(hex(f >> 8, 2))).arg(f >> 8));
+    const char* flagNames[] = {"Z", "N", "H", "C"};
+    for (int i = 0; i < 4; ++i) flagChips_[std::size_t(i)]->setText(flagChip(flagNames[i], f & (0x80 >> i)));
+    flags_->setText(QString("  A = %1 (%2)").arg(q(hex(f >> 8, 2))).arg(f >> 8));
     // On banked cartridges, the same PC can hold different code: say which bank.
     auto where = [&s](const Instruction& i) {
         const bool banked = s.cartridge.info.banked() && i.pc < 0x8000 && !(s.cartridge.bootMapped && i.pc < 0x100);
@@ -895,13 +963,13 @@ void MainWindow::refresh() {
             bool changed = previous_ && previous_->memoryBase == s.memoryBase && previous_->memory[index] != s.memory[index];
             cell(memory_, row, c + 1, s.memoryAvailable[index] ? q(hex(s.memory[index], 2)).mid(1) + (changed ? " Δ" : "") : "—", changed);
             auto a = std::uint16_t(memoryBase_ + index);
-            memory_->item(row, c + 1)->setToolTip(romLabel(a) + "\n" + q(regionName(a)) +
-                "\nWRAM echo aliases are canonicalized. IO values are raw storage, not synthesized CPU bus reads.");
+            memory_->item(row, c + 1)->setToolTip(byteTip(a, romLabel(a), s.memory[index], s.memoryAvailable[index], changed));
         }
     }
     const auto& a = s.activity;
-    activityLabel_->setText(QString("%1 interval: %2 opcodes · writes VRAM %3 / WRAM %4 / OAM %5 / IO %6%7")
+    activityLabel_->setText(QString("%1 interval: %2 opcodes · writes VRAM %3 / WRAM %4 / OAM %5 / IO %6%7%8")
         .arg(running_ ? "Live" : "Last").arg(a.instructions).arg(a.writes[1]).arg(a.writes[2]).arg(a.writes[3]).arg(a.writes[4])
+        .arg(a.dmaTransfers ? QString(" · OAM DMA %1").arg(a.dmaTransfers) : QString())
         .arg(s.traceEnabled ? "" : " (capture off)"));
     diagram_->setSnapshot(s);
     updatePanels(!running_);
@@ -923,7 +991,9 @@ void MainWindow::updatePanels(bool force) {
                 cell(writes_, row, 3, bankEffect(e, s.cartridge.info), e.banksBefore != e.banksAfter);
             } else {
                 cell(writes_, row, 2, q(hex(e.address)) + " " + q(addressName(e.address, programOf(s))));
-                cell(writes_, row, 3, (e.valuesAvailable ? q(hex(e.before, 2)) : "—") + " → " + (e.valuesAvailable ? q(hex(e.after, 2)) : "—"));
+                cell(writes_, row, 3, (e.valuesAvailable ? q(hex(e.before, 2)) : "—") + " → " + (e.valuesAvailable ? q(hex(e.after, 2)) : "—") +
+                     (e.address == 0xFF46 ? QString(" · starts OAM DMA from %1").arg(q(hex(std::uint16_t(e.requested << 8)))) : QString()),
+                     e.address == 0xFF46);
             }
         }
         traceStatus_->setText(QString("%1 · %2/%3 retained · %4 evicted (earlier history incomplete) · from t=%5. "
@@ -937,6 +1007,12 @@ void MainWindow::updatePanels(bool force) {
     if (map) map_->setMap(activity_, programOf(s));
     if (cart) cartridge_->setSnapshot(s, activity_);
 }
+namespace {
+QString html(const QString& plain) { return plain.toHtmlEscaped().replace('\n', "<br>"); }
+QString addressLink(std::uint16_t a) {
+    return QString("<a href='addr:%1' style='color:%2'>%3</a>").arg(a, 4, 16, QChar('0')).arg(style::accent.name(), q(hex(a)));
+}
+}
 void MainWindow::updateWriter() {
     const WriteEvent* found = nullptr;
     if (selectedEvent_) {
@@ -946,9 +1022,44 @@ void MainWindow::updateWriter() {
             if (i->canonicalAddress == canonicalAddress(selectedAddress_)) { found = &*i; break; }
         }
     }
+    // OAM is also written by DMA, which the CPU write hook cannot see. The newer
+    // of the last CPU store and the last observed copy is the last writer.
+    const auto a = canonicalAddress(selectedAddress_);
+    if (!selectedEvent_ && a >= 0xFE00 && a < 0xFE00 + oamBytes) {
+        const auto i = std::size_t(a - 0xFE00);
+        auto requestedBy = [](const DmaTransfer& d) {
+            return d.instruction ? q(hex(d.instruction->pc)) + "  " + q(disassemble(*d.instruction)) : QString("an unrecorded instruction");
+        };
+        if (const auto& c = snapshot_.dmaCopying; c && (!found || found->endTicks <= c->requestEndTicks || !c->requestEndTicks)) {
+            writer_->setText(html(QString("OAM DMA in progress: %1 asked the hardware to copy %2–%3 into OAM at t=%4. The copy takes "
+                                          "160 machine cycles while the CPU keeps running; step a few more instructions to see it land.")
+                .arg(requestedBy(*c), q(hex(c->sourceOf(0))), q(hex(c->sourceOf(oamBytes - 1)))).arg(c->requestStartTicks)));
+            return;
+        }
+        const DmaTransfer* dma = snapshot_.dma.empty() ? nullptr : &snapshot_.dma.back();
+        if (dma && (!found || found->endTicks <= dma->requestEndTicks)) {
+            const auto& d = *dma;
+            QString text = QString("<b>Last writer: OAM DMA</b>, a hardware copy rather than a CPU store. %1 wrote %2 to $FF46 "
+                                   "in [%3, %4] ticks, asking for %5–%6 to be copied into $FE00–$FE9F. ")
+                .arg(html(requestedBy(d)), q(hex(d.page, 2))).arg(d.requestStartTicks).arg(d.requestEndTicks)
+                .arg(q(hex(d.sourceOf(0))), q(hex(d.sourceOf(oamBytes - 1))));
+            if (d.status == DmaTransfer::Status::Restarted) {
+                text += QString("A newer request restarted it at t=%1, so only part of it was copied.").arg(d.checkedTicks);
+            } else {
+                text += QString("Checked at t=%1: %2 of 160 OAM bytes equal their source%3.").arg(d.checkedTicks).arg(d.matching)
+                    .arg(d.matching == int(oamBytes) ? QString() : QString(" (the source or OAM changed during or after the copy)"));
+            }
+            text += QString("<br>This byte came from %1: before %2 · after %3. Click %1 to see which instruction put the value there.")
+                .arg(addressLink(d.sourceOf(i)), q(hex(d.before[i], 2)), q(hex(d.after[i], 2)));
+            writer_->setText(text);
+            return;
+        }
+    }
     if (!found) {
-        writer_->setText("Last writer: no retained evidence. Capture may be off, the write may predate the window, or the hardware "
-                         "used a path without this CPU callback (e.g. DMA).");
+        writer_->setText(html(snapshot_.traceEnabled
+            ? "Last writer: no retained evidence. The write may predate the capture window, or happened by a path the CPU "
+              "write hook cannot see."
+            : "Last writer: Capture writes is off, so writes are not being recorded."));
         return;
     }
     const auto& e = *found;
@@ -965,12 +1076,14 @@ void MainWindow::updateWriter() {
         text += QString("\nBefore %1 · requested %2 · after %3. %4")
             .arg(e.valuesAvailable ? q(hex(e.before, 2)) : "—", q(hex(e.requested, 2)), e.valuesAvailable ? q(hex(e.after, 2)) : "—",
                  e.physicalStorage ? "Physical storage observed." : "Raw register/ROM storage; not proof of acceptance.");
+        if (e.address == 0xFF46) text += QString("\nThis starts an OAM DMA copy of %1–%2 into $FE00–$FE9F.")
+            .arg(q(hex(std::uint16_t(e.requested << 8))), q(hex(std::uint16_t(e.requested << 8 | 0x9F))));
     }
     if (e.instruction) {
         const auto note = instructionNote(e.instruction->pc, e.instruction->bank, programOf(snapshot_));
         if (!note.empty()) text += "\n" + q(note);
     }
-    writer_->setText(text);
+    writer_->setText(html(text));
 }
 void MainWindow::showLicenses() {
     const auto app = QCoreApplication::applicationDirPath();

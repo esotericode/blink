@@ -1,5 +1,7 @@
 #include "ui/tile_view.hpp"
 #include "ui/style.hpp"
+#include "ui/tooltip.hpp"
+#include "teaching/glossary.hpp"
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QFontMetrics>
@@ -120,14 +122,18 @@ bool TileSheet::event(QEvent* event) {
     if (event->type() == QEvent::ToolTip) {
         auto* help = static_cast<QHelpEvent*>(event);
         const int t = tileAt(help->pos());
-        if (t < 0) { QToolTip::hideText(); return true; }
-        QString text = QString("Tile %1 · %2").arg(t).arg(tileRange(t));
-        if (t < 128) text += "\nBlock $8000: sprites, and background when LCDC bit 4 = 1";
-        else if (t < 256) text += "\nBlock $8800: shared by sprites and background";
-        else text += "\nBlock $9000: background when LCDC bit 4 = 0";
-        if (spriteTiles_.count(t)) text += "\nUsed by an on-screen sprite";
-        if (mapTiles_.count(t)) text += "\nReferenced by the background map";
-        QToolTip::showText(help->globalPos(), text, this);
+        if (t < 0) { tips::show(this, help->globalPos(), tips::key("tiles.sheet"), rect()); return true; }
+        QString body = QString("An 8×8 picture stored as 16 bytes at %1. ").arg(tileRange(t));
+        if (t < 128) body += "This block is used by sprites, and by the background when LCDC bit 4 = 1.";
+        else if (t < 256) body += "This block is shared by sprites and the background.";
+        else body += "This block is used by the background when LCDC bit 4 = 0.";
+        QStringList uses;
+        if (spriteTiles_.count(t)) uses << "an on-screen sprite";
+        if (mapTiles_.count(t)) uses << "the background map";
+        if (!uses.isEmpty()) body += " Used by " + uses.join(" and ") + ".";
+        const int s = scale(), cell = 8 * s + 1, slot = t - block_ * 128;
+        tips::show(this, help->globalPos(), tips::make(QString("Tile %1").arg(t), body, "Click to see its bits."),
+                   QRect(1 + (slot % 16) * cell, 1 + (slot / 16) * cell, 8 * s, 8 * s));
         return true;
     }
     return QWidget::event(event);
@@ -136,7 +142,7 @@ bool TileSheet::event(QEvent* event) {
 TileDetail::TileDetail(QWidget* parent) : QWidget(parent) {
     setObjectName("tileDetail");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setToolTip("Click a row to show its two bytes in the memory inspector.");
+    tips::setCustom(this);
 }
 void TileDetail::setData(const VideoState& video, int tile, TilePalette palette, QString usage) {
     video_ = video; tile_ = tile; palette_ = palette; usage_ = std::move(usage);
@@ -230,6 +236,58 @@ void TileDetail::paintEvent(QPaintEvent*) {
         }
     }
 }
+bool TileDetail::event(QEvent* event) {
+    if (event->type() != QEvent::ToolTip) return QWidget::event(event);
+    auto* help = static_cast<QHelpEvent*>(event);
+    const auto l = layout();
+    const QPoint p = help->pos();
+    const int row = (p.y() - l.rowsTop) / std::max(1, l.rowHeight);
+    if (p.y() < l.rowsTop || row >= 8) {
+        tips::show(this, help->globalPos(), p.y() >= 22 && p.y() < 62 ? tips::key("tiles.palette")
+            : tips::make(QString("Tile %1").arg(tile_), "Each of the 8 rows is two bytes. Bit n of the first byte and bit n of "
+                         "the second byte together give pixel n its colour number.", "Hover a bit or a pixel below for details."),
+            p.y() < l.rowsTop ? QRect(0, 0, width(), l.rowsTop) : QRect(0, l.rowsTop + 8 * l.rowHeight, width(), height()));
+        return true;
+    }
+    const auto address = std::uint16_t(tileAddress(tile_) + row * 2);
+    const auto low = video_.vram[std::size_t(address - 0x8000)], high = video_.vram[std::size_t(address - 0x8000 + 1)];
+    const int top = l.rowsTop + row * l.rowHeight;
+    auto bit = [](std::uint8_t byte, int c) { return (byte >> (7 - c)) & 1; };
+    auto binary = [](std::uint8_t byte) { return QString("%1").arg(byte, 8, 2, QChar('0')); };
+    if (p.x() < l.lowHexX) {
+        tips::show(this, help->globalPos(), tips::make(QString("Row %1 · %2").arg(row).arg(q(hex(address))),
+            QString("This row is two bytes: %1 at %2 (bit plane 0) and %3 at %4 (bit plane 1).")
+                .arg(q(hex(low, 2)), q(hex(address)), q(hex(high, 2)), q(hex(std::uint16_t(address + 1)))),
+            "Click to view them in the Memory panel."), QRect(0, top, l.lowHexX, l.rowHeight));
+        return true;
+    }
+    for (auto [byte, hexX, bitsX, plane, key] : {std::tuple{low, l.lowHexX, l.lowX, 0, "tiles.low"}, std::tuple{high, l.highHexX, l.highX, 1, "tiles.high"}}) {
+        if (p.x() < hexX || p.x() >= bitsX + 8 * l.bit) continue;
+        const int c = p.x() < bitsX ? -1 : (p.x() - bitsX) / l.bit;
+        const Explanation e = glossary(key);
+        QString body = q(e.body) + QString(" Row %1's byte is %2 = %3 in binary.").arg(row).arg(q(hex(byte, 2)), binary(byte));
+        if (c >= 0) body += QString(" Bit for pixel %1 (counting from the left): %2.").arg(c).arg(bit(byte, c));
+        tips::show(this, help->globalPos(), tips::make(q(e.title), body),
+                   c >= 0 ? QRect(bitsX + c * l.bit, top, l.bit, l.rowHeight) : QRect(hexX, top, bitsX - hexX, l.rowHeight));
+        (void)plane;
+        return true;
+    }
+    if (p.x() >= l.pixelX && p.x() < l.pixelX + 8 * l.pixel) {
+        const int c = (p.x() - l.pixelX) / l.pixel;
+        const int h = bit(high, c), lo = bit(low, c), n = h * 2 + lo;
+        QString result;
+        if (palette_ == TilePalette::ColorNumbers) result = "No palette is applied in this view.";
+        else if (isObject(palette_) && n == 0) result = QString("For sprites, colour 0 is always transparent.");
+        else result = QString("%1 turns colour %2 into shade %3 (0 = lightest, 3 = darkest).")
+                          .arg(paletteName(palette_)).arg(n).arg(shade(paletteRegister(video_, palette_), std::uint8_t(n)));
+        tips::show(this, help->globalPos(), tips::make(QString("Pixel %1 of row %2 · colour %3").arg(c).arg(row).arg(n),
+            QString("High bit %1 × 2 + low bit %2 = colour number %3. ").arg(h).arg(lo).arg(n) + result),
+            QRect(l.pixelX + c * l.pixel, top, l.pixel, l.pixel));
+        return true;
+    }
+    tips::show(this, help->globalPos(), tips::key("tiles.pixels"), QRect(0, top, width(), l.rowHeight));
+    return true;
+}
 void TileDetail::mousePressEvent(QMouseEvent* event) {
     const auto l = layout();
     const int row = (int(event->position().y()) - l.rowsTop) / l.rowHeight;
@@ -253,6 +311,19 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     auto* side = new QWidget;
     auto* sideLayout = new QVBoxLayout(side);
     sideLayout->setContentsMargins(0, 0, 0, 0);
+    // Where OAM's contents came from: CPU stores or a DMA copy (see Snapshot::dma).
+    oamSource_ = new QLabel;
+    oamSource_->setObjectName("oamSource");
+    oamSource_->setWordWrap(true);
+    oamSource_->setTextFormat(Qt::RichText);
+    oamSource_->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    oamSource_->setToolTip(tips::key("tiles.source"));
+    connect(oamSource_, &QLabel::linkActivated, this, [this](const QString& link) {
+        bool ok = false;
+        const auto a = link.startsWith("addr:") ? link.mid(5).toUInt(&ok, 16) : 0u;
+        if (ok) emit addressActivated(std::uint16_t(a));
+    });
+    sideLayout->addWidget(oamSource_);
     oam_ = new QTableWidget(spriteCount, 5);
     oam_->setObjectName("oamTable");
     oam_->setHorizontalHeaderLabels({"#", "Y+16", "X+8", "Tile", "Attr"});
@@ -264,12 +335,16 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     oam_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     oam_->horizontalHeader()->setMinimumSectionSize(24);
     oam_->setFont(style::monospace());
-    oam_->setToolTip("Object Attribute Memory at $FE00: 40 records of Y+16, X+8, tile, attributes. Grey rows are off-screen.");
+    oam_->setToolTip(tips::key("tiles.oam"));
+    {
+        const char* keys[] = {"tiles.col.index", "tiles.col.y", "tiles.col.x", "tiles.col.tile", "tiles.col.attr"};
+        for (int c = 0; c < 5; ++c) oam_->horizontalHeaderItem(c)->setToolTip(tips::key(keys[c]));
+    }
     for (int r = 0; r < spriteCount; ++r) for (int c = 0; c < 5; ++c) oam_->setItem(r, c, new QTableWidgetItem);
     sideLayout->addWidget(oam_, 2);
     paletteChoice_ = new QComboBox;
     paletteChoice_->setObjectName("tilePalette");
-    paletteChoice_->setToolTip("How tile pixels are coloured in the sheet and the detail.");
+    paletteChoice_->setToolTip(tips::key("tiles.palette"));
     paletteChoice_->addItem("Colours: auto (sprite's palette, else BGP)");
     paletteChoice_->addItem("Colours: BGP · background");
     paletteChoice_->addItem("Colours: OBP0 · sprite palette 0");
@@ -283,9 +358,10 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
         auto* button = new QPushButton(q(hex(0x8000 + b * 0x800)));
         button->setObjectName(QString("tileBlock%1").arg(b));
         button->setCheckable(true);
-        button->setToolTip(b == 0 ? "Tiles 0–127 at $8000–$87FF: sprite tiles, and background tiles when LCDC bit 4 = 1"
-                         : b == 1 ? "Tiles 128–255 at $8800–$8FFF: shared by sprites and background"
-                                  : "Tiles 256–383 at $9000–$97FF: background tiles when LCDC bit 4 = 0");
+        button->setToolTip(tips::make(b == 0 ? "Tiles 0–127 · $8000–$87FF" : b == 1 ? "Tiles 128–255 · $8800–$8FFF" : "Tiles 256–383 · $9000–$97FF",
+            b == 0 ? "Used by sprites, and by the background when LCDC bit 4 = 1."
+          : b == 1 ? "Shared by sprites and the background."
+                   : "Used by the background when LCDC bit 4 = 0.", q(glossary("tiles.block").body)));
         blocks_->addButton(button, b);
         blockRow->addWidget(button);
     }
@@ -323,6 +399,23 @@ TilePalette TileInspector::palette() const {
 }
 void TileInspector::setSnapshot(const Snapshot& snapshot) {
     video_ = snapshot.video;
+    auto link = [](std::uint16_t a) {
+        return QString("<a href='addr:%1' style='color:%2'>%3</a>").arg(a, 4, 16, QChar('0')).arg(style::accent.name(), q(hex(a)));
+    };
+    if (snapshot.dmaCopying) {
+        oamSource_->setText(QString("<b>OAM DMA copying now</b> from %1 (requested at t=%2).")
+            .arg(link(snapshot.dmaCopying->sourceOf(0))).arg(snapshot.dmaCopying->requestStartTicks));
+    } else if (!snapshot.dma.empty()) {
+        const auto& d = snapshot.dma.back();
+        oamSource_->setText(QString("OAM last filled by <b>DMA</b>: a hardware copy of %1–%2 (a \"shadow\" sprite table), "
+                                    "requested by %3 at t=%4; %5 bytes changed.")
+            .arg(link(d.sourceOf(0)), q(hex(d.sourceOf(oamBytes - 1))),
+                 d.instruction ? q(hex(d.instruction->pc)).toHtmlEscaped() : QString("an unrecorded instruction"))
+            .arg(d.requestStartTicks).arg(d.changed()));
+    } else {
+        oamSource_->setText(snapshot.traceEnabled ? "No OAM DMA seen since capture began: OAM changes come from CPU stores."
+                                                  : "Capture writes is off: OAM DMA copies are not recorded.");
+    }
     haveData_ = true;
     const int height = video_.lcdc & 0x04 ? 16 : 8;
     for (int i = 0; i < spriteCount; ++i) {
@@ -334,7 +427,9 @@ void TileInspector::setSnapshot(const Snapshot& snapshot) {
         for (int c = 0; c < 5; ++c) {
             auto* item = oam_->item(i, c);
             item->setText(values[c]);
-            item->setToolTip(where);
+            item->setToolTip(tips::make(QString("Sprite %1 · OAM %2").arg(i).arg(q(hex(std::uint16_t(0xFE00 + i * 4)))),
+                where + QString(": Y+16 = %1, X+8 = %2, tile %3, attributes %4.").arg(s.y).arg(s.x).arg(s.tile).arg(q(hex(s.flags, 2))),
+                "Click to show its tile below."));
             item->setForeground(visible ? style::text : style::muted);
         }
     }

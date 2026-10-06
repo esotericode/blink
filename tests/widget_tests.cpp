@@ -4,7 +4,9 @@
 #include "ui/main_window.hpp"
 #include "ui/system_diagram.hpp"
 #include "ui/tile_view.hpp"
+#include "ui/tooltip.hpp"
 #include "teaching_rom.hpp"
+#include "fixtures.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QDir>
@@ -18,7 +20,11 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QScreen>
+#include <QTabBar>
 #include <QTimer>
+#include <QToolBar>
+#include <QToolButton>
 #include <QUrl>
 #include <iostream>
 #include <stdexcept>
@@ -241,6 +247,74 @@ int main(int argc, char** argv) {
         window.loadTeaching(); // switching games saves the battery first
         { QFile sav(dir.filePath("mbc5 demo.sav")); require(sav.open(QIODevice::ReadOnly) && std::uint8_t(sav.readAll()[0])==8,"Battery not saved when switching games"); }
 
+        // OAM DMA: the copy is named as OAM's writer, and the source byte leads to its CPU writer.
+        const auto dmaRom=dmaFixture(); const auto dmaPath=dir.filePath("dma.gb");
+        { QFile f(dmaPath); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(dmaRom.data()),qint64(dmaRom.size()))==qint64(dmaRom.size()),"Fixture write failed"); }
+        window.loadFile(dmaPath);
+        auto first=window.runUntilWritten(0xFE01);
+        require(first.stop==WatchResult::Stop::Dma && first.dma && first.dma->page==0xC1,"Run until written did not stop at the first DMA copy");
+        auto second=window.runUntilWritten(0xFE01); // the next frame's copy, after the CPU bumped $C101
+        require(second.stop==WatchResult::Stop::Dma && window.selectedAddress()==0xFE01 && window.displayedSnapshot().video.oam[1]==2,"Second DMA copy not shown");
+        require(writer->text().contains("OAM DMA") && writer->text().contains("addr:c101") && writer->text().contains("160 of 160"),"DMA not named as OAM's writer");
+        auto* oamSource=window.findChild<QLabel*>("oamSource");
+        require(oamSource && oamSource->text().contains("DMA") && oamSource->text().contains("$C100"),"Sprites panel does not show the DMA source");
+        int dmaRow=-1;
+        for (int row=0;row<writes->rowCount();++row) if (writes->item(row,2)->text().startsWith("$FF46")) { dmaRow=row; break; }
+        require(dmaRow>=0 && writes->item(dmaRow,3)->text().contains("starts OAM DMA from $C100"),"DMA request row lacks its effect");
+        window.findChild<QDockWidget*>("memoryDock")->raise();
+        shot("dma-writer.png");
+        emit writer->linkActivated("addr:c101");
+        require(window.selectedAddress()==0xC101 && writer->text().contains("INC [HL]"),"Source link did not lead to the CPU writer of the shadow byte");
+        window.loadTeaching();
+
+        // Tooltips: hovering asks Qt for a tooltip; every one is answered by the explanatory card.
+        window.resize(1280,930); window.resetLayout(); QTest::qWait(30);
+        auto hover=[&](QWidget* w, QPoint pos) {
+            QCursor::setPos(w->mapToGlobal(pos));
+            QHelpEvent help(QEvent::ToolTip,pos,w->mapToGlobal(pos));
+            QApplication::sendEvent(w,&help);
+            return tips::currentText();
+        };
+        // Screen grabs include the card, which is its own window (needs a real X display).
+        auto screenShot=[&](const QString& name) {
+            if (shots.isEmpty()) return;
+            QTest::qWait(200);
+            const auto image=QGuiApplication::primaryScreen()->grabWindow(0);
+            if (!image.isNull()) require(image.save(QDir(shots).filePath(name)),"Screen grab could not be saved");
+        };
+        window.findChild<QDockWidget*>("cpuDock")->raise();
+        auto pcTip=hover(regs->viewport(),regs->visualItemRect(regs->item(0,5)).center());
+        require(pcTip.contains("PC · program counter") && pcTip.contains("next instruction") && tips::current(),"Register tooltip missing");
+        require(tips::current()->width()<=400,"Tooltip card too wide to read comfortably");
+        screenShot("tooltip-register.png");
+        auto* zero=window.findChild<QLabel*>("flagZ");
+        require(zero && hover(zero,zero->rect().center()).contains("Z · zero flag"),"Flag tooltip missing");
+        require(hover(diagram,QPoint(int(diagram->width()*0.3),diagram->height()/2)).contains("CPU · Sharp SM83"),"Diagram part tooltip missing");
+        screenShot("tooltip-diagram.png");
+        window.setMemoryBase(0xC000);
+        window.findChild<QDockWidget*>("memoryDock")->raise(); QTest::qWait(20);
+        auto cellTip=hover(memory->viewport(),memory->visualItemRect(memory->item(0,1)).center());
+        require(cellTip.contains("$C000 player_x") && cellTip.contains("WRAM · work RAM") && cellTip.contains("Value $"),"Memory byte tooltip missing");
+        screenShot("tooltip-memory.png");
+        QTabBar* docks=nullptr; int cartridgeTab=-1;
+        for (auto* bar : window.findChildren<QTabBar*>()) for (int i=0;i<bar->count();++i) if (bar->tabText(i)=="Cartridge · banks") { docks=bar; cartridgeTab=i; }
+        require(docks && hover(docks,docks->tabRect(cartridgeTab).center()).contains("16 KiB"),"Panel tab tooltip missing");
+        auto* toolbar=window.findChild<QToolBar*>("executionToolbar");
+        auto* runButton=toolbar->widgetForAction(run);
+        require(hover(runButton,runButton->rect().center()).contains("Run / pause"),"Toolbar tooltip missing");
+        auto* bankMap=window.findChild<BankMap*>("bankMap");
+        window.findChild<QDockWidget*>("cartridgeDock")->raise(); QTest::qWait(20);
+        require(hover(bankMap,QPoint(30,40)).contains("fixed ROM window"),"Bank map window tooltip missing");
+        tilesDock->raise(); QTest::qWait(20);
+        auto* detail=window.findChild<TileDetail*>("tileDetail");
+        require(detail,"Tile detail missing");
+        bool pixelTip=false;
+        for (int x=detail->width()-12;x>detail->width()/2 && !pixelTip;x-=6) pixelTip=hover(detail,QPoint(x,100)).contains("colour number");
+        require(pixelTip,"Tile pixel tooltip missing");
+        screenShot("tooltip-tile-pixel.png");
+        tips::hide();
+        require(!tips::current(),"Tooltip did not hide");
+
         // Screenshots for documentation: mid-lesson, where the outline leads the picture.
         if (argc>1) {
             window.resize(1280,930); window.resetLayout(); QTest::qWait(30);
@@ -259,7 +333,7 @@ int main(int argc, char** argv) {
         std::cout << "PASS Qt " << qVersion() << " / " << qPrintable(QGuiApplication::platformName())
                   << ": native widgets, input/focus, run/pause, instruction/frame, run-until-written, synchronized inspectors, writer selection, "
                      "guided lesson (hold → WRAM store → OAM store → frame → tile), tile/OAM/activity panels, cartridge/bank panel, "
-                     "bank-switch lesson, MBC writer text, any-ROM drop loading, battery .sav load/save; UI heartbeats=" << heartbeats << "\n";
+                     "bank-switch lesson, MBC writer text, any-ROM drop loading, battery .sav load/save, OAM DMA as writer, explanatory tooltips; UI heartbeats=" << heartbeats << "\n";
     } catch(const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }

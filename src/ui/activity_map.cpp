@@ -1,7 +1,10 @@
 #include "ui/activity_map.hpp"
 #include "teaching/annotations.hpp"
 #include "ui/style.hpp"
+#include "ui/tooltip.hpp"
+#include "teaching/glossary.hpp"
 #include <QComboBox>
+#include <QHelpEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -38,6 +41,7 @@ double heat(std::uint32_t n, double logMax) {
 ActivityMapView::ActivityMapView(QWidget* parent) : QWidget(parent) {
     setObjectName("activityMap");
     setMouseTracking(true);
+    tips::setCustom(this);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     map_.writes.assign(0x10000, 0); map_.executions.assign(0x10000, 0);
     rebuild();
@@ -180,6 +184,27 @@ void ActivityMapView::mouseMoveEvent(QMouseEvent* event) {
     if (a != hover_) { hover_ = a; update(); }
 }
 void ActivityMapView::leaveEvent(QEvent*) { hover_.reset(); update(); }
+bool ActivityMapView::event(QEvent* event) {
+    if (event->type() != QEvent::ToolTip) return QWidget::event(event);
+    auto* help = static_cast<QHelpEvent*>(event);
+    const auto p = help->pos();
+    const auto g = geometry();
+    auto detail = detailAddress(p);
+    const auto a = detail ? detail : overviewAddress(p);
+    if (!a) { tips::show(this, help->globalPos(), tips::key("map.view"), rect()); return true; }
+    const auto region = regionExplanation(*a);
+    const auto io = ioRegisterExplanation(*a);
+    const auto name = addressName(*a, program_);
+    QString title = q(hex(*a)) + (name.empty() ? QString() : " · " + q(name));
+    QString body = QString("%1. %2").arg(q(io.empty() ? region.title : io.title), q(io.empty() ? region.body : io.body));
+    QString counts = QString("%1 write attempts · %2 instructions started here").arg(map_.writes[*a]).arg(map_.executions[*a]);
+    if (!map_.writesObserved) counts += " (writes not counted: capture is off)";
+    // The overview is one pixel per address: keep the tip only for the spot under the pointer.
+    const QRect area = detail ? QRect(g.detail.x() + (*a & 15) * g.cell, g.detail.y() + ((*a >> 4) & 15) * g.cell, g.cell, g.cell)
+                              : QRect(p - QPoint(2, 2), QSize(5, 5));
+    tips::show(this, help->globalPos(), tips::make(title, body, counts + ". Click to inspect."), area);
+    return true;
+}
 
 ActivityPanel::ActivityPanel(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
@@ -191,11 +216,12 @@ ActivityPanel::ActivityPanel(QWidget* parent) : QWidget(parent) {
     top->addWidget(interval_, 1);
     mode_ = new QComboBox;
     mode_->setObjectName("activityMode");
+    mode_->setToolTip(tips::key("map.mode"));
     mode_->addItems({"Writes + opcodes", "Write attempts", "Opcode starts"});
     top->addWidget(mode_);
     auto* clear = new QPushButton("Clear");
     clear->setObjectName("activityClear");
-    clear->setToolTip("Start a new counting interval at the current cursor.");
+    clear->setToolTip(tips::key("map.clear"));
     top->addWidget(clear);
     root->addLayout(top);
     view_ = new ActivityMapView;

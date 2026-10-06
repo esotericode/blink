@@ -3,6 +3,7 @@
 #include "emulator/graphics.hpp"
 #include "teaching/annotations.hpp"
 #include "teaching_rom.hpp"
+#include "fixtures.hpp"
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -405,6 +406,58 @@ void bankParityAndOtherCartridges() {
     require(mbcRegisterName(Mbc::Mbc1, 0x2000).find("ROM bank") != std::string::npos && mbcRegisterName(Mbc::None, 0x2000).empty(),"MBC register names wrong");
     std::cout << "PASS banked trace parity, MBC5 at 128 KiB, ROM size validation, header heuristics, CGB flags, MBC register names\n";
 }
+void oamDma() {
+    // The request is observed; the copy is checked against SameBoy's own timing.
+    Engine e; e.loadRom(dmaFixture()); toCartridge(e, 0x150);
+    const auto before = e.snapshot().video.oam;
+    require(before[159] != 159,"Fixture needs OAM's last byte to change");
+    auto request = e.runUntilWrite(0xFF46, 140448);
+    require(request.stop == WatchResult::Stop::Write && request.write->requested == 0xC1 && request.write->instruction &&
+            request.write->instruction->pc == 0xFF82,"DMA request write not captured from HRAM");
+    const auto requestEnd = e.ticks();
+    auto copying = e.snapshot();
+    require(copying.dmaCopying && copying.dmaCopying->page == 0xC1 && copying.dmaCopying->before == before && copying.dma.empty(),
+            "DMA in progress not published");
+    // Step until the last OAM byte arrives; the check must not come earlier.
+    std::uint64_t lastByte = 0;
+    while (!lastByte && e.ticks() - requestEnd < 4000) {
+        e.stepInstruction();
+        if (e.inspect(0xFE9F) == 159) lastByte = e.ticks();
+    }
+    require(lastByte && lastByte - requestEnd > 1200 && lastByte <= requestEnd + 1296,"DMA duration differs from the checked window");
+    while (e.snapshot().dma.empty() && e.ticks() - requestEnd < 4000) e.stepInstruction();
+    auto s = e.snapshot();
+    require(s.dma.size() == 1 && !s.dmaCopying,"DMA check missing");
+    const auto& t = s.dma.back();
+    require(t.status == DmaTransfer::Status::Checked && t.matching == 160 && t.page == 0xC1 && t.sourceOf(5) == 0xC105 &&
+            t.instruction && t.instruction->pc == 0xFF82 && t.requestEndTicks == requestEnd &&
+            t.checkedTicks >= requestEnd + 1296 && t.checkedTicks < requestEnd + 1296 + 64,"DMA record wrong");
+    for (std::size_t i = 0; i < oamBytes; ++i) require(t.after[i] == i && s.video.oam[i] == i,"OAM not equal to the copied source");
+    require(t.changed() == int(std::count_if(before.begin(), before.end(), [i = 0](auto b) mutable { return b != i++; })),"Changed-byte count wrong");
+    // Run until written on OAM stops at the next frame's checked copy, which moved sprite 0.
+    auto next = e.runUntilWrite(0xFE01, 2 * 140448);
+    require(next.stop == WatchResult::Stop::Dma && next.dma && next.dma->after[1] == 2 && next.dma->before[1] == 1 &&
+            next.dma->changed() == 1 && e.inspect(0xFE01) == 2,"Run until OAM written did not stop at the DMA check");
+    // Restart: a second request before the first finished.
+    Engine r; r.loadRom(dmaFixture(true)); toCartridge(r, 0x150);
+    r.runUntilWrite(0xFE00, 0xFE9F, 140448);
+    s = r.snapshot();
+    require(s.dma.size() == 2 && s.dma[0].status == DmaTransfer::Status::Restarted && s.dma[1].status == DmaTransfer::Status::Checked &&
+            s.dma[1].matching == 160 && s.dma[1].instruction->pc == 0xFF84,"Restarted DMA not recorded");
+    // Tracing changes nothing; without capture there are no DMA records.
+    Engine traced, plain; plain.setTraceEnabled(false);
+    traced.loadRom(dmaFixture()); plain.loadRom(dmaFixture());
+    std::size_t checked = 0;
+    for (int frame = 0; frame < 12; ++frame) {
+        traced.stepFrame(); plain.stepFrame();
+        for (const auto& d : traced.snapshot().dma) checked += d.matching == 160;
+        require(plain.snapshot().dma.empty(),"DMA recorded with capture off");
+    }
+    require(traced.stateBytes() == plain.stateBytes() && traced.ticks() == plain.ticks(),"DMA observation changed emulation");
+    require(checked >= 10,"Per-frame DMA copies not all verified");
+    std::cout << "PASS OAM DMA: request captured from HRAM, copy timing within the checked window, OAM equals source, "
+                 "run-until-written stops at the copy, restart, parity, capture-off\n";
+}
 void decode() {
     require(disassemble({0x200,{0xEA,0x00,0xC0}})=="LD [$C000], A","LD disassembly wrong");
     require(disassemble({0x200,{0xCB,0x47,0}})=="BIT 0, A","CB disassembly wrong");
@@ -412,7 +465,7 @@ void decode() {
     require(instructionLength(0xEA)==3 && instructionLength(0xCB)==2 && instructionLength(0x76)==1,"Instruction length wrong");
 }
 int main() {
-    try { decode(); postBootState(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); bankedCartridge(); bankParityAndOtherCartridges(); }
+    try { decode(); postBootState(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); bankedCartridge(); bankParityAndOtherCartridges(); oamDma(); }
     catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }

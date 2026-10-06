@@ -70,8 +70,9 @@ Before/after bytes are physical storage for WRAM/VRAM/OAM/HRAM, otherwise raw
 register/ROM observations. IO masks and asynchronous peripheral effects are not
 reconstructed. Equal requested/after values alone are not a general proof of
 acceptance. The demo uses direct writes during VBlank, without DMA, and tests
-verify the position/OAM store and its visible consequence. Direct DMA OAM writes
-and PPU accesses bypass this hook and are not captured. No source is fabricated.
+verify the position/OAM store and its visible consequence. DMA's OAM writes and
+PPU accesses bypass this hook; OAM DMA is observed separately (below). No source
+is fabricated.
 
 Up to eight pending write records fit one atomic step (SM83 opcode/interrupt
 work uses fewer in the tested slice). Overflow is counted as incomplete history.
@@ -124,6 +125,30 @@ same cartridge and restores battery RAM, like a power cycle. The UI writes the
 buffer to `<rom folder>/<rom name>.sav`; that is file I/O outside emulation and
 does not change the emulated state.
 
+## OAM DMA
+
+SameBoy's DMA is internal (no public hook or status). With capture on, the
+write hook sees the CPU's write to `$FF46`; at that moment (before the core
+accepts it) the engine copies OAM through direct access as the record's
+`before`, with the requesting instruction and page. A copy already running is
+closed as `Restarted`. After the requesting step ends, the engine waits at
+least 1,296 ticks: SameBoy runs one warm-up machine cycle, 160 copies, and one
+closing cycle (162 × 4 T-cycles × 2 ticks). Steps without an opcode (HALT,
+interrupt service) extend the wait, because SameBoy pauses DMA while halted.
+At the first boundary past that point it copies OAM as `after` and counts how
+many of the 160 bytes equal their source byte read from storage (sources at
+`$E000+` read `$C000+` on DMG, as SameBoy does). A test steps one instruction
+at a time and confirms the last byte lands inside the window.
+
+These are observations, not a per-byte trace: the record says when the copy
+was requested and what OAM held before and after, not exactly when each byte
+moved. Where the source changed during the copy, or OAM changed later, the
+match count is below 160 and is shown. CPU stores to OAM made after the check
+are newer writers than the copy. `runUntilWrite` on an OAM address also stops
+at the boundary where a copy was checked. Records are bounded (64), cleared
+with capture, and add nothing to the save state; tracing on/off parity is
+tested with a per-frame DMA program.
+
 ## Video storage, previous output, and input
 
 Each snapshot copies VRAM (8 KiB DMG), OAM (160 bytes), and LCDC, STAT, SCY,
@@ -163,7 +188,8 @@ DMA or PPU fetches, which the CPU hooks do not see.
 | pure tile, OAM, and palette decoding of copied storage | `src/emulator/graphics.*` |
 | semantic names, curated source notes, region names | `src/teaching/annotations.*`, generated symbols |
 | guided lesson text from real evidence (button press, bank switch) | `src/teaching/lesson.*` |
-| native controls, presentation, wall-clock scheduling, input focus | `src/ui/*` |
+| plain-language explanations shown as tooltips | `src/teaching/glossary.*` |
+| native controls, presentation, wall-clock scheduling, input focus, tooltip card | `src/ui/*` |
 | reproducible original cartridges (teaching, bank demo) and boot | `rom/*`, `tools/assemble_rom.py` |
 | battery `.sav` files, ROM file loading | `src/ui/main_window.cpp` |
 

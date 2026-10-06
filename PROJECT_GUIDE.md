@@ -17,6 +17,12 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
   windows, every ROM/RAM bank, the live mapping, per-bank activity, MBC
   register writes with their effect, and a plain-language explanation; a
   bank lesson stops at a real switch. User ROMs get no invented names.
+- OAM DMA copies are observed (request, OAM before/after, match against the
+  source) so sprite bytes in real games have an honest writer that leads back
+  to the shadow table and its CPU writer.
+- Every control and view explains itself in a tooltip card drawn from a
+  plain-language glossary (registers, flags, memory regions and hardware
+  registers, system parts, banks, tile bits and pixels, panels).
 - Guided lesson "Follow one press of Right": joypad → `player_x` store → OAM X
   store (outline ahead of the unchanged picture) → next frame with changed
   pixels → the tile's bit planes. Every stop is a real emulator event.
@@ -38,9 +44,8 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
   Windows CI, launched from a clean folder. A physical Windows desktop,
   installers, signing, and macOS remain unverified.
 
-Next: an observed OAM DMA record for real games' sprites, an interrupt and
-timer lesson built from real IF/IE storage and execution events, and a
-background-map view linking map entries to tiles. Do not present end-of-frame
+Next: an interrupt and timer lesson built from real IF/IE storage and
+execution events, and a background-map view linking map entries to tiles. Do not present end-of-frame
 reconstruction as pixel provenance.
 
 ## Purpose

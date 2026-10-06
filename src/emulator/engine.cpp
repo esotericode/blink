@@ -25,6 +25,15 @@ struct Engine::Impl {
     std::uint64_t bootExecutions{}, romBankChanges{}, ramBankChanges{};
     std::optional<Instruction> active, lastExecuted;
     std::deque<WriteEvent> history;
+    // OAM DMA: at most one copy runs; finished records are bounded.
+    static constexpr std::size_t dmaCapacity = 64;
+    // SameBoy: one warm-up machine cycle, 160 copies, one closing cycle (4
+    // T-cycles each, 2 ticks per T-cycle). Its DMA pauses while the CPU is halted.
+    static constexpr std::uint64_t dmaTicks = 162 * 4 * 2;
+    std::optional<DmaTransfer> dmaPending;
+    std::uint64_t dmaDeadline{}, dmaId{};
+    std::deque<DmaTransfer> dmaHistory;
+    bool stepDma{};
     std::array<WriteEvent, 8> pending{};
     std::size_t pendingCount{}, stepWrites{};
     Activity activity;
@@ -165,6 +174,7 @@ struct Engine::Impl {
                      address < 0xA000 ? 1 : address < 0xFE00 ? 2 : address < 0xFF00 ? 3 : 4;
         ++s.activity.writes[region];
         ++s.writeCounts[address];
+        if (address == 0xFF46) s.requestDma(value);
         if (s.pendingCount == s.pending.size()) { ++s.evicted; return true; }
         auto& event = s.pending[s.pendingCount++];
         event = {};
@@ -183,6 +193,37 @@ struct Engine::Impl {
         event.requested = value;
         return true; // Observation must never suppress a core write.
     }
+    void copyOam(std::array<std::uint8_t, oamBytes>& out) const {
+        std::size_t size = 0;
+        auto* bytes = static_cast<const std::uint8_t*>(GB_get_direct_access(const_cast<GB_gameboy_t*>(&gb), GB_DIRECT_ACCESS_OAM, &size, nullptr));
+        if (bytes) std::copy_n(bytes, std::min(size, out.size()), out.begin());
+    }
+    // Called from the write hook before the core accepts the $FF46 write, so
+    // OAM is still the "before" state. A copy already running restarts.
+    void requestDma(std::uint8_t page) {
+        if (dmaPending) finishDma(DmaTransfer::Status::Restarted);
+        DmaTransfer t;
+        t.id = ++dmaId;
+        t.requestStartTicks = ticks;
+        t.instruction = active;
+        t.page = page;
+        copyOam(t.before);
+        dmaPending = t;
+    }
+    void finishDma(DmaTransfer::Status status) {
+        auto t = *dmaPending;
+        dmaPending.reset();
+        if (!t.requestEndTicks) t.requestEndTicks = ticks;
+        t.status = status;
+        t.checkedTicks = ticks;
+        copyOam(t.after);
+        t.matching = 0;
+        for (std::size_t i = 0; i < oamBytes; ++i) t.matching += t.after[i] == inspect(t.sourceOf(i));
+        if (dmaHistory.size() == dmaCapacity) dmaHistory.pop_front();
+        dmaHistory.push_back(t);
+        ++activity.dmaTransfers;
+        stepDma = status == DmaTransfer::Status::Checked; // a restarted copy is superseded
+    }
     void clearMap() {
         std::fill(writeCounts.begin(), writeCounts.end(), 0);
         std::fill(executionCounts.begin(), executionCounts.end(), 0);
@@ -195,8 +236,19 @@ struct Engine::Impl {
         active.reset();
         pendingCount = 0;
         frameArrived = false;
+        stepDma = false;
         auto elapsed = GB_run(&gb);
         ticks += elapsed;
+        if (dmaPending) {
+            if (!dmaPending->requestEndTicks) {
+                // The write happened somewhere in this step; count from its end.
+                dmaPending->requestEndTicks = ticks;
+                dmaDeadline = ticks + dmaTicks;
+            } else if (!active) {
+                dmaDeadline += elapsed; // halted (DMA paused) or interrupt service; checking late is safe
+            }
+            if (ticks >= dmaDeadline) finishDma(DmaTransfer::Status::Checked);
+        }
         if (frameArrived) frameTick = ticks;
         if (!bootDone && !bootMapped()) bootDone = true;
         const auto after = banks();
@@ -257,6 +309,7 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     s.bootDone = false;
     s.mapping = s.banks();
     s.history.clear(); s.active.reset(); s.lastExecuted.reset(); s.activity = {};
+    s.dmaHistory.clear(); s.dmaPending.reset(); s.dmaId = 0;
     s.held = 0; s.clearMap();
     s.frameKind = "No completed frame";
 }
@@ -297,6 +350,7 @@ void Engine::setTraceEnabled(bool enabled) {
     GB_set_write_memory_callback(&s.gb, enabled ? Impl::write : nullptr);
     // Old writers could be stale after an unobserved interval. Clear the capture.
     s.history.clear(); s.evicted = 0; s.activity = {}; s.activity.startTicks = s.ticks;
+    s.dmaHistory.clear(); s.dmaPending.reset();
     s.clearMap();
 }
 StepResult Engine::stepInstruction() {
@@ -327,15 +381,18 @@ WatchResult Engine::runUntilWrite(std::uint16_t first, std::uint16_t last, std::
     const auto low = canonicalAddress(first), high = canonicalAddress(last);
     const auto ticks0 = s.ticks, instructions0 = s.instructions, frames0 = s.frames;
     result.banksBefore = s.mapping;
-    for (unsigned calls = 0; calls < 4000000 && s.ticks - ticks0 < limitTicks && !result.write; ++calls) {
+    // OAM is also written by DMA: stop once a copy into the range has been checked.
+    const bool oam = low <= 0xFE9F && high >= 0xFE00;
+    for (unsigned calls = 0; calls < 4000000 && s.ticks - ticks0 < limitTicks && !result.write && !result.dma; ++calls) {
         s.atomic();
         // This step's records are the newest; capacity (>= 8) always retains them.
         for (auto i = s.history.size() - std::min(s.stepWrites, s.history.size()); i < s.history.size(); ++i) {
             const auto a = s.history[i].canonicalAddress;
             if (a >= low && a <= high) { result.write = s.history[i]; break; }
         }
+        if (!result.write && oam && s.stepDma) result.dma = s.dmaHistory.back();
     }
-    result.stop = result.write ? WatchResult::Stop::Write : WatchResult::Stop::Limit;
+    result.stop = result.write ? WatchResult::Stop::Write : result.dma ? WatchResult::Stop::Dma : WatchResult::Stop::Limit;
     result.banksAfter = s.mapping;
     result.advancedTicks = s.ticks - ticks0;
     result.instructions = s.instructions - instructions0;
@@ -414,6 +471,8 @@ Snapshot Engine::snapshot(std::uint16_t memoryBase) {
     out.pixels.assign(s.completed.begin(), s.completed.end());
     out.previousPixels.assign(s.previous.begin(), s.previous.end()); out.previousFrame = s.previousFrame;
     out.writes.assign(s.history.begin(), s.history.end());
+    out.dma.assign(s.dmaHistory.begin(), s.dmaHistory.end());
+    out.dmaCopying = s.dmaPending;
     out.activity = s.activity; out.activity.endTicks = s.ticks;
     s.activity = {}; s.activity.startTicks = s.ticks;
     return out;
