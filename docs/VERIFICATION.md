@@ -3,6 +3,14 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Release 0.5.0
+
+PR #2 merged as `ac848c9` after CI passed on `7f446d9` (Linux with the
+AddressSanitizer engine suite, and native Windows). Release workflow run 4
+built and verified both packages from `ac848c9` and published
+[v0.5.0](https://github.com/esotericode/blink/releases/tag/v0.5.0) (Latest):
+Windows ZIP 12,511,968 bytes, Ubuntu `.deb` 498,586 bytes, and `SHA256SUMS.txt`.
+
 ## 2026-10-06 — Review of PR #2 before release 0.5.0
 
 Independent review of `codex/save-safety-and-learning-clarity` at `f3622b2`:
