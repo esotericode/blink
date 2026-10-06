@@ -122,7 +122,7 @@ void InformationPanel::updateFacts() {
         facts = "General hardware reference · click an item to attach its observed facts."; break;
     case InformationKind::Memory: {
         const auto a = current_.address;
-        facts = QString("Selected %1 · %2").arg(q(hex(a)), q(regionName(a)));
+        facts = "Selected " + q(hex(a));
         const auto name = addressName(a, programOf(s)); if (!name.empty()) facts += " · " + q(name);
         if (a >= s.memoryBase && std::size_t(a - s.memoryBase) < memoryWindow) {
             const auto i = std::size_t(a - s.memoryBase);
@@ -159,7 +159,7 @@ void InformationPanel::updateFacts() {
     case InformationKind::MapCell: {
         const auto a = std::clamp<int>(current_.address, 0x9800, 0x9FFF);
         const auto entry = s.video.vram[std::size_t(a - 0x8000)]; const int tile = backgroundTile(entry, s.video.lcdc & 0x10);
-        facts = QString("Selected map %1 cell (%2, %3) · entry %4 at %5 → physical tile %6 at %7 · %8 addressing")
+        facts = QString("Map %1 cell (%2, %3): %5 = %4 → tile %6 (%7) · %8")
             .arg(q(hex(a & 0xFC00))).arg((a & 0x3FF) % 32).arg((a & 0x3FF) / 32).arg(q(hex(entry, 2)), q(hex(a)))
             .arg(tile).arg(q(hex(tileAddress(tile))), s.video.lcdc & 0x10 ? "unsigned $8000" : "signed $9000"); break;
     }
@@ -175,7 +175,7 @@ void InformationPanel::updateFacts() {
             .arg(current_.ram ? (current_.index == s.cartridge.banks.ram ? "currently selected at $A000" : "currently unmapped") :
                  current_.index == s.cartridge.banks.rom ? "currently mapped at $4000" : current_.index == s.cartridge.banks.rom0 ? "currently mapped at $0000" : "currently unmapped"); break;
     }
-    if (current_.kind != InformationKind::Topic) facts += QString("\nObserved at State now: t = %1 ticks · output #%2 has its own completion time.").arg(s.ticks).arg(s.frames);
+    if (current_.kind != InformationKind::Topic) facts += QString("\nState now: t = %1 ticks").arg(s.ticks);
     facts_->setText(facts);
 }
 } // namespace observatory

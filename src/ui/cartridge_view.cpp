@@ -265,6 +265,7 @@ CartridgePanel::CartridgePanel(QWidget* parent) : QWidget(parent) {
     root->addWidget(explanation_);
     auto* row = new QHBoxLayout;
     stats_ = new QLabel; stats_->setObjectName("cartridgeStats"); stats_->setWordWrap(true);
+    stats_->setProperty("informationTopic", "activity");
     stats_->setToolTip(tips::key("cart.stats"));
     row->addWidget(stats_, 1);
     run_ = new QPushButton("Run until the bank changes");

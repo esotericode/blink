@@ -302,6 +302,7 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     root->setContentsMargins(6, 6, 6, 6);
     caption_ = new QLabel;
     caption_->setObjectName("tileCaption");
+    caption_->setProperty("informationTopic", "vram");
     caption_->setWordWrap(true);
     caption_->setText("Decoded from VRAM and OAM storage at the shared cursor. Each tile row is two bytes, a bit-0 plane and a bit-1 plane; "
                       "together they give each pixel a colour number, which a palette register maps to a shade.");
@@ -348,6 +349,7 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     sideLayout->addWidget(oam_, 2);
     paletteChoice_ = new QComboBox;
     paletteChoice_->setObjectName("tilePalette");
+    paletteChoice_->setProperty("informationTopic", "palettes");
     paletteChoice_->setToolTip(tips::key("tiles.palette"));
     paletteChoice_->addItem("Colours: auto (sprite's palette, else BGP)");
     paletteChoice_->addItem("Colours: BGP · background");
@@ -361,6 +363,7 @@ TileInspector::TileInspector(QWidget* parent) : QWidget(parent) {
     for (int b = 0; b < 3; ++b) {
         auto* button = new QPushButton(q(hex(0x8000 + b * 0x800)));
         button->setObjectName(QString("tileBlock%1").arg(b));
+        button->setProperty("informationTopic", "tile-data");
         button->setCheckable(true);
         button->setToolTip(tips::make(b == 0 ? "Tiles 0–127 · $8000–$87FF" : b == 1 ? "Tiles 128–255 · $8800–$8FFF" : "Tiles 256–383 · $9000–$97FF",
             b == 0 ? "Used by sprites, and by the background when LCDC bit 4 = 1."

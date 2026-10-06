@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     app.setFont(QFont("DejaVu Sans", 10));
 #endif
     QCommandLineParser parser;
-    parser.setApplicationDescription("Native DMG teaching lab; starts offline with its bundled original ROM.\n"
+    parser.setApplicationDescription("Native DMG exploration lab with detailed selection information; starts offline with its bundled original ROM.\n"
                                      "Battery saves are read from and written to <rom name>.sav beside the ROM.");
     parser.addHelpOption(); parser.addVersionOption();
     parser.addPositionalArgument("rom", "Optional Game Boy ROM file to open (any SameBoy-supported cartridge, up to 8 MiB).");

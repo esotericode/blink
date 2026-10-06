@@ -245,9 +245,11 @@ void MainWindow::buildActions() {
     toolbar->addWidget(spacer);
     badge_ = new QLabel; badge_->setObjectName("stateBadge");
     badge_->setToolTip(tips::key("ui.badge"));
+    badge_->setProperty("informationTopic", "time");
     toolbar->addWidget(badge_);
     cursor_ = new QLabel; cursor_->setObjectName("cursorLabel");
     cursor_->setToolTip(tips::key("ui.cursor"));
+    cursor_->setProperty("informationTopic", "time");
     toolbar->addWidget(cursor_);
 }
 
@@ -450,7 +452,10 @@ void MainWindow::buildDocks() {
     });
 
     tiles_ = new TileInspector;
-    tilesDock_ = makeDock("Sprites and tiles", "tilesDock", tiles_);
+    auto* graphicsScroll = new QScrollArea; graphicsScroll->setObjectName("graphicsScroll");
+    graphicsScroll->setWidget(tiles_); graphicsScroll->setWidgetResizable(true);
+    graphicsScroll->setFrameShape(QFrame::NoFrame);
+    tilesDock_ = makeDock("Sprites and tiles", "tilesDock", graphicsScroll);
     connect(tiles_, &TileInspector::spriteSelected, this, [this](int index) {
         game_->setSelectedSprite(index);
         if (index >= 0) { information_->select({InformationKind::Sprite, "oam", {}, 0, index}); informationDock_->show(); }
@@ -482,6 +487,7 @@ void MainWindow::buildDocks() {
     traceLayout->setContentsMargins(6, 6, 6, 6);
     traceStatus_ = label({}, "traceStatusLabel");
     traceStatus_->setToolTip(tips::key("writes.status"));
+    traceStatus_->setProperty("informationTopic", "writes");
     traceLayout->addWidget(traceStatus_);
     writes_ = table(0, 4, {"Tick end", "Instruction", "Address / name", "Before → after / effect"});
     writes_->setObjectName("writeTable");
@@ -529,6 +535,7 @@ void MainWindow::buildDocks() {
 
     activityLabel_ = new QLabel; activityLabel_->setObjectName("activityLabel");
     activityLabel_->setToolTip(tips::key("ui.activity"));
+    activityLabel_->setProperty("informationTopic", "activity");
     statusBar()->addPermanentWidget(activityLabel_);
 }
 
@@ -550,7 +557,7 @@ void MainWindow::resetLayout() {
     // The game needs about 500 px for 3× scale; the inspectors get the rest.
     resizeDocks({systemDock_}, {std::max(560, width() - 520)}, Qt::Horizontal);
     // Leave the game enough height for 3× scale at the default size, 2× at the minimum.
-    resizeDocks({informationDock_}, {std::clamp(h - 640, 220, 300)}, Qt::Vertical);
+    resizeDocks({informationDock_}, {std::clamp(h - 640, 200, 300)}, Qt::Vertical);
 }
 
 void MainWindow::warmTeaching() {

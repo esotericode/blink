@@ -29,6 +29,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QScreen>
+#include <QScrollArea>
 #include <QTabBar>
 #include <QTimer>
 #include <QToolBar>
@@ -161,10 +162,12 @@ int main(int argc, char** argv) {
         shot("info-3-sprite.png");
         auto* sheet = window.findChild<TileSheet*>("tileSheet");
         require(sheet, "Tile sheet missing");
+        window.findChild<QScrollArea*>("graphicsScroll")->ensureWidgetVisible(sheet);
         QTest::mouseClick(sheet, Qt::LeftButton, Qt::NoModifier, QPoint(5,5));
         require(info->selection().kind == InformationKind::Tile && info->selection().index == tiles->selectedTile(), "Tile click did not select its explanation");
         require(tiles->selectedSprite() == -1 && body->toPlainText().contains("high × 2 + low"), "Tile explanation lacks the bit-plane decoding");
         shot("info-4-tile.png");
+        window.findChild<QScrollArea*>("graphicsScroll")->verticalScrollBar()->setValue(0);
         graphicsTabs->setCurrentIndex(1); QTest::qWait(20);
         auto* tileMap = window.findChild<TileMapView*>("tileMapView");
         auto* mapChoice = window.findChild<QComboBox*>("tileMapChoice");
@@ -461,7 +464,12 @@ int main(int argc, char** argv) {
             window.resize(window.minimumSize()); window.resetLayout(); QTest::qWait(30);
             require(window.grab().save(QString::fromLocal8Bit(argv[2])),"Minimum-size screenshot could not be saved");
             tilesDock->raise(); graphicsTabs->setCurrentIndex(1); QTest::qWait(30);
+            auto* graphicsScroll = window.findChild<QScrollArea*>("graphicsScroll");
+            require(graphicsScroll && graphicsScroll->verticalScrollBar()->maximum() > 0,
+                    "Short graphics dock has no way to reveal the full map and caption");
             shot("minimum-tile-map.png");
+            graphicsScroll->verticalScrollBar()->setValue(graphicsScroll->verticalScrollBar()->maximum());
+            shot("minimum-tile-map-scrolled.png");
             window.loadBankDemo(); shot("minimum-cartridge.png");
         }
         std::cout << "PASS Qt " << qVersion() << " / " << qPrintable(QGuiApplication::platformName())
