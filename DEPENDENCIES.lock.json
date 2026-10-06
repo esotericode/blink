@@ -33,6 +33,8 @@
     "python": "3.12.3"
   },
   "teaching_rom_sha256": "e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672",
+  "bank_demo_rom_sha256": "b9c2530bff25161ac3810d893263ab54cee99ade64a0526a61bc7551e746c8c7",
+  "boot_sha256": "e758c75ff459e3ac8786850d551c49c2e6b5c1ef64f9d7757b9b59eb67e1895f",
   "windows": {
     "ci_runner": "GitHub Actions windows-2025",
     "qt": {

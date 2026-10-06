@@ -1,3 +1,4 @@
+#include "emulator/cartridge.hpp"
 #include "emulator/engine.hpp"
 #include "emulator/graphics.hpp"
 #include "teaching/annotations.hpp"
@@ -5,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 #include <thread>
 
@@ -123,17 +125,46 @@ void safetyAndBounds() {
     std::thread other([&] { try { e.snapshot(); } catch(const std::logic_error&) { wrongOwner=true; } }); other.join();
     require(wrongOwner,"Non-owner access was permitted");
     auto otherRom = demo::rom; otherRom[0x3000]=1; e.loadRom(otherRom);
-    require(!e.snapshot().teaching && addressName(0xC000,false).empty(),"Unrecognized ROM received invented semantic names");
+    require(!e.snapshot().teaching && addressName(0xC000,Program::Other).empty(),"Unrecognized ROM received invented semantic names");
     std::cout << "PASS pure inspection/pause, invalid load, ownership, bounded 300-frame run, unannotated-ROM safety; 3ms quantum observed " << elapsed << " us\n";
     std::cout << "MEASURE traced sustained run: " << benchmarkUs / 300.0 << " us/frame (16.74 ms hardware frame period); no real-time guarantee\n";
+}
+// Step until the boot program has handed over and PC is at a cartridge address.
+void toCartridge(Engine& e, std::uint16_t pc) {
+    for (int n = 0; n < 200000; ++n) {
+        if (e.snapshot().registers.pc == pc) return;
+        e.stepInstruction();
+    }
+    throw std::runtime_error("Boot did not reach the cartridge");
+}
+void postBootState() {
+    // The original boot must leave the documented DMG hand-over state (Pan Docs
+    // "Power Up Sequence") so ordinary cartridges start: LCD on, A = $01.
+    for (bool zeroChecksum : {false, true}) {
+        auto rom = demo::rom;
+        if (zeroChecksum) rom[0x14D] = 0;
+        Engine e; e.loadRom(rom);
+        toCartridge(e, 0x0100);
+        const auto s = e.snapshot();
+        const std::uint16_t af = zeroChecksum ? 0x0180 : 0x01B0;
+        require(s.registers.af == af && s.registers.bc == 0x0013 && s.registers.de == 0x00D8 &&
+                s.registers.hl == 0x014D && s.registers.sp == 0xFFFE,"Post-boot CPU registers differ from DMG hand-over");
+        require(s.video.lcdc == 0x91 && s.video.bgp == 0xFC && e.inspect(0xFF50) & 1,"Post-boot LCD/palette/boot-unmap state wrong");
+        require(std::all_of(s.video.vram.begin(),s.video.vram.end(),[](auto b) { return b == 0; }),"Boot did not clear VRAM");
+    }
+    std::cout << "PASS boot hands over with DMG post-boot registers, LCD on, BGP, cleared VRAM, and checksum-dependent flags\n";
 }
 void interruptAndHalt() {
     auto rom = demo::rom;
     // Original controlled fixture: enable a pending VBlank interrupt, then halt.
     const std::uint8_t code[] = {0xF3,0x31,0xFF,0xDF,0x3E,0x01,0xE0,0x0F,0xEA,0xFF,0xFF,0xFB,0x00,0x00,0x76};
     std::copy(std::begin(code),std::end(code),rom.begin()+0x150);
-    rom[0x40]=0xF3; rom[0x41]=0x76;
+    // Handler: DI, clear IE, HALT. With no interrupt enabled, the HALT can never
+    // end (the LCD is on after boot, so VBlank would otherwise wake it).
+    const std::uint8_t handler[] = {0xF3,0xAF,0xE0,0xFF,0x76};
+    std::copy(std::begin(handler),std::end(handler),rom.begin()+0x40);
     Engine e; e.loadRom(rom);
+    toCartridge(e, 0x0150);
     bool interruptWrite = false, halted = false;
     for (int n = 0; n < 40; ++n) {
         e.stepInstruction(); auto s=e.snapshot();
@@ -143,7 +174,7 @@ void interruptAndHalt() {
                 interruptWrite=true;
             }
         }
-        if (s.lastExecuted && s.lastExecuted->pc==0x41) { halted=true; break; }
+        if (s.lastExecuted && s.lastExecuted->pc==0x44) { halted=true; break; }
     }
     require(interruptWrite && halted,"Interrupt/HALT fixture did not run");
     auto before=e.snapshot(); auto result=e.stepInstruction(); auto after=e.snapshot();
@@ -252,6 +283,128 @@ void activityMapping() {
     require(map.executions[demo::write_player_x_right]==1,"Execution counts stopped while capture is off");
     std::cout << "PASS activity map: per-address CPU write attempts and opcode starts over a labeled interval; cleared on capture toggle\n";
 }
+
+// The bank demo is running its main loop with bank 1 drawn.
+void readyBankDemo(Engine& e) {
+    for (int i = 0; i < 16; ++i) {
+        e.stepFrame();
+        auto s = e.snapshot();
+        if (s.frameKind == "VBlank frame" && s.video.lcdc == 0x91 && e.inspect(bankdemo::current_bank) == 1) return;
+    }
+    throw std::runtime_error("Bank demo did not start");
+}
+bool tileIs(Engine& e, std::span<const std::uint8_t> bytes) {
+    for (std::size_t i = 0; i < bytes.size(); ++i) if (e.inspect(std::uint16_t(0x8010 + i)) != bytes[i]) return false;
+    return true;
+}
+std::span<const std::uint8_t> bankPattern(std::span<const std::uint8_t> rom, int bank) {
+    return rom.subspan(std::size_t(bank) * 0x4000 + (bankdemo::bank1_pattern - 0x4000), 16);
+}
+void bankedCartridge() {
+    const std::span<const std::uint8_t> rom(bankdemo::rom);
+    Engine e; e.loadRom(rom);
+    auto s = e.snapshot();
+    const auto& info = s.cartridge.info;
+    require(s.bankDemo && !s.teaching && info.mbc == Mbc::Mbc1 && info.typeName == "MBC1+RAM+BATTERY" && info.romBanks() == 4 &&
+            info.battery && info.ram && info.headerRamBytes == 8192 && info.headerChecksumValid && info.title == "BANK DEMO","Header decode wrong");
+    require(s.cartridge.romBytes == 65536 && s.cartridge.ramBytes == 8192 && s.cartridge.bootMapped,"Emulator cartridge buffers wrong");
+    readyBankDemo(e);
+    s = e.snapshot();
+    require(s.cartridge.banks.rom == 1 && s.cartridge.banks.rom0 == 0 && tileIs(e, bankPattern(rom, 1)),"Bank 1 not mapped/drawn");
+    for (int i = 0; i < 16; ++i) require(e.inspect(std::uint16_t(0x4000 + i)) == rom[0x4000 + i],"Window $4000 is not bank 1 storage");
+    // Press A: the program writes 2 to the MBC1 bank register.
+    e.setButton(Button::A,true);
+    auto change = e.runUntilBankChange(4 * 140448);
+    require(change.stop == WatchResult::Stop::BankChange && change.banksBefore.rom == 1 && change.banksAfter.rom == 2,"Bank change not observed");
+    require(change.write && change.write->address == 0x2000 && change.write->requested == 2 && change.write->instruction &&
+            change.write->instruction->pc == bankdemo::write_rom_bank && change.write->banksBefore.rom == 1 && change.write->banksAfter.rom == 2,
+            "Bank change lacks its MBC writer evidence");
+    s = e.snapshot();
+    require(s.cartridge.banks.rom == 2 && s.next.pc == bankdemo::call_bank,"Cursor not after the bank-select write");
+    for (int i = 0; i < 64; ++i) require(e.inspect(std::uint16_t(0x4000 + i)) == rom[2 * 0x4000 + i],"Window $4000 does not show bank 2 storage");
+    require(!tileIs(e, bankPattern(rom, 2)),"Tile changed before bank 2's routine ran");
+    // The CALL lands in bank 2's routine: same address, different bytes.
+    for (int n = 0; n < 4 && e.snapshot().next.pc != 0x4000; ++n) e.stepInstruction();
+    s = e.snapshot();
+    require(s.next.pc == 0x4000 && s.next.bank == 2 && s.next.bytes[0] == rom[2 * 0x4000],"Next instruction not from bank 2");
+    e.stepInstruction();
+    require(e.snapshot().lastExecuted->bank == 2,"Executed opcode not attributed to bank 2");
+    // Cartridge RAM: enable, increment, disable.
+    auto save = e.runUntilWrite(bankdemo::saved_count, 140448);
+    require(save.stop == WatchResult::Stop::Write && save.write->physicalStorage && save.write->before == 0 &&
+            save.write->requested == 1 && save.write->after == 1 && save.write->bank == 0 && e.inspect(0xA000) == 1,"Cartridge RAM write not observed");
+    e.stepFrame();
+    require(tileIs(e, bankPattern(rom, 2)),"Bank 2's pattern not drawn");
+    // Three more presses: 3, 1 (wraps), 2.
+    for (int expected : {3, 1, 2}) {
+        e.setButton(Button::A,false); e.stepFrame(); e.setButton(Button::A,true);
+        auto next = e.runUntilBankChange(4 * 140448);
+        require(next.stop == WatchResult::Stop::BankChange && next.banksAfter.rom == expected,"Bank sequence wrong");
+        e.stepFrame(); e.stepFrame();
+    }
+    e.setButton(Button::A,false);
+    require(e.inspect(bankdemo::saved_count) == 4 && tileIs(e, bankPattern(rom, 2)),"Saved count or pattern wrong after four switches");
+    ActivityMap map; e.activityMap(map);
+    const auto cartridgeOpcodes = std::accumulate(map.executions.begin(), map.executions.begin() + 0x8000, std::uint64_t{});
+    const auto perBank = std::accumulate(map.bankExecutions.begin(), map.bankExecutions.end(), std::uint64_t{});
+    require(map.bankExecutions.size() == 4 && map.bankExecutions[1] && map.bankExecutions[2] && map.bankExecutions[3] &&
+            perBank + map.bootExecutions == cartridgeOpcodes && map.romBankChanges == 4,"Per-bank execution accounting wrong");
+    // Inspecting every window with bank 2 mapped and RAM present changes nothing.
+    const auto state = e.stateBytes();
+    for (unsigned base = 0; base <= 0xFF80; base += 128) e.snapshot(std::uint16_t(base));
+    require(e.stateBytes() == state,"Banked inspection changed emulator state");
+    // Battery: a power cycle keeps cartridge RAM; a fresh engine can load the .sav bytes.
+    const auto battery = e.batteryData();
+    require(battery.size() == 8192 && battery[0] == 4 && battery[1] == 0x42,"Battery data wrong");
+    e.restart(); readyBankDemo(e);
+    require(e.inspect(bankdemo::saved_count) == 4,"Restart lost battery-backed RAM");
+    Engine fresh; fresh.loadRom(rom); fresh.loadBattery(battery); readyBankDemo(fresh);
+    require(fresh.inspect(bankdemo::saved_count) == 4,"Loaded battery data not visible");
+    std::cout << "PASS MBC1 cartridge: header decode, bank-aware windows and disassembly, bank-change stop with MBC writer, banked code, "
+                 "cartridge RAM evidence, per-bank counts, pure inspection, battery across restart and reload\n";
+}
+void bankParityAndOtherCartridges() {
+    // Tracing must not change banked execution either.
+    Engine traced, plain; plain.setTraceEnabled(false);
+    traced.loadRom(bankdemo::rom); plain.loadRom(bankdemo::rom);
+    readyBankDemo(traced); readyBankDemo(plain);
+    for (int press = 0; press < 3; ++press) {
+        traced.setButton(Button::A,true); plain.setButton(Button::A,true);
+        auto a = traced.runUntilBankChange(4 * 140448), b = plain.runUntilBankChange(4 * 140448);
+        require(a.stop == b.stop && a.banksAfter == b.banksAfter && a.instructions == b.instructions && !b.write,"Bank-change watch differs with tracing");
+        require(traced.stateBytes() == plain.stateBytes(),"Tracing changed banked execution");
+        traced.setButton(Button::A,false); plain.setButton(Button::A,false);
+        traced.stepFrame(); plain.stepFrame();
+    }
+    // The same program as an MBC5 cartridge padded to 128 KiB: other controller, more banks.
+    std::vector<std::uint8_t> mbc5(bankdemo::rom.begin(), bankdemo::rom.end());
+    mbc5.resize(128 * 1024, 0xFF);
+    mbc5[0x147] = 0x1B; mbc5[0x148] = 0x02;
+    Engine e; e.loadRom(mbc5); readyBankDemo(e);
+    auto s = e.snapshot();
+    require(s.cartridge.info.mbc == Mbc::Mbc5 && s.cartridge.info.romBanks() == 8 && !s.cartridge.info.headerChecksumValid && !s.bankDemo,"MBC5 header decode wrong");
+    e.setButton(Button::A,true);
+    auto change = e.runUntilBankChange(4 * 140448);
+    require(change.stop == WatchResult::Stop::BankChange && change.banksAfter.rom == 2 && e.inspect(0x4000) == mbc5[2 * 0x4000],"MBC5 bank switch wrong");
+    // Accept any size SameBoy can map; reject non-cartridges without touching the current one.
+    const auto before = e.stateBytes();
+    bool tooSmall = false, tooLarge = false;
+    try { std::vector<std::uint8_t> tiny(0x14F); e.loadRom(tiny); } catch (const std::invalid_argument&) { tooSmall = true; }
+    try { std::vector<std::uint8_t> huge(maxRomBytes + 1); e.loadRom(huge); } catch (const std::invalid_argument&) { tooLarge = true; }
+    require(tooSmall && tooLarge && e.stateBytes() == before,"ROM size validation wrong");
+    // Header facts for cartridges this demo cannot exercise.
+    auto variant = [](std::uint8_t type, std::uint8_t cgb, std::size_t size) {
+        std::vector<std::uint8_t> rom(demo::rom.begin(), demo::rom.end());
+        rom.resize(size, 0xFF); rom[0x147] = type; rom[0x143] = cgb;
+        return describeCartridge(rom);
+    };
+    require(variant(0x00, 0x00, 65536).mbc == Mbc::Mbc3 && !variant(0x00, 0x00, 65536).note.empty(),"No-MBC oversize heuristic wrong");
+    require(!variant(0x55, 0x00, 32768).supported && variant(0x55, 0x00, 32768).mbc == Mbc::Unknown,"Unknown type not flagged");
+    require(variant(0x13, 0xC0, 32768).cgbOnly() && variant(0x13, 0x80, 32768).cgbEnhanced() && variant(0x13, 0, 32768).timer == false &&
+            variant(0x10, 0, 32768).timer && variant(0x20, 0, 32768).supported == false,"CGB flags or controller features wrong");
+    require(mbcRegisterName(Mbc::Mbc1, 0x2000).find("ROM bank") != std::string::npos && mbcRegisterName(Mbc::None, 0x2000).empty(),"MBC register names wrong");
+    std::cout << "PASS banked trace parity, MBC5 at 128 KiB, ROM size validation, header heuristics, CGB flags, MBC register names\n";
+}
 void decode() {
     require(disassemble({0x200,{0xEA,0x00,0xC0}})=="LD [$C000], A","LD disassembly wrong");
     require(disassemble({0x200,{0xCB,0x47,0}})=="BIT 0, A","CB disassembly wrong");
@@ -259,7 +412,7 @@ void decode() {
     require(instructionLength(0xEA)==3 && instructionLength(0xCB)==2 && instructionLength(0x76)==1,"Instruction length wrong");
 }
 int main() {
-    try { decode(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); }
+    try { decode(); postBootState(); parity(); steppingAndMovement(); safetyAndBounds(); interruptAndHalt(); graphicsDecoding(); watchMovementLesson(); watchParity(); activityMapping(); bankedCartridge(); bankParityAndOtherCartridges(); }
     catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }

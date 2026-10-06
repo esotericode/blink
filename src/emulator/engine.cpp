@@ -18,7 +18,11 @@ struct Engine::Impl {
     std::array<std::uint32_t, screenPixels> rendering{}, completed{}, previous{};
     std::uint64_t ticks{}, instructions{}, frames{}, frameTick{}, eventId{}, evicted{}, previousFrame{};
     std::string frameKind = "No completed frame";
-    bool traceEnabled = true, teaching{}, frameArrived{}, inited{};
+    bool traceEnabled = true, teaching{}, bankDemo{}, frameArrived{}, inited{}, bootDone{};
+    CartridgeInfo cartridge;
+    BankMapping mapping;               // Mapping at the start of the current atomic step.
+    std::vector<std::uint32_t> bankExecutions;
+    std::uint64_t bootExecutions{}, romBankChanges{}, ramBankChanges{};
     std::optional<Instruction> active, lastExecuted;
     std::deque<WriteEvent> history;
     std::array<WriteEvent, 8> pending{};
@@ -55,8 +59,35 @@ struct Engine::Impl {
         }
         // frameTick is finalized at the enclosing GB_run boundary, not the callback cycle.
     }
+    // Boot mapping is one-way: once FF50 unmaps it, it never returns.
+    bool bootMapped() const {
+        // Literal FF50's implementation returns only boot_rom_finished and does
+        // not synchronize a peripheral. General safe reads can sync PPU/APU and
+        // change a saved state, so they are not used anywhere else.
+        return !bootDone && !(GB_safe_read_memory(const_cast<GB_gameboy_t*>(&gb), 0xFF50) & 1);
+    }
+    std::uint16_t bankOf(GB_direct_access_t type, std::size_t* size = nullptr) const {
+        std::size_t bytes = 0; std::uint16_t bank = 0;
+        GB_get_direct_access(const_cast<GB_gameboy_t*>(&gb), type, &bytes, &bank);
+        if (size) *size = bytes;
+        return bank;
+    }
+    BankMapping banks() const {
+        std::size_t ramSize = 0;
+        BankMapping m;
+        m.rom0 = bankOf(GB_DIRECT_ACCESS_ROM0);
+        m.rom = bankOf(GB_DIRECT_ACCESS_ROM);
+        const auto ram = bankOf(GB_DIRECT_ACCESS_CART_RAM, &ramSize);
+        m.ram = ramSize ? ram : 0;
+        return m;
+    }
+    std::uint16_t romBankAt(std::uint16_t pc) const {
+        if (pc >= 0x8000 || (pc < 0x100 && bootMapped())) return 0;
+        return pc < 0x4000 ? bankOf(GB_DIRECT_ACCESS_ROM0) : bankOf(GB_DIRECT_ACCESS_ROM);
+    }
     Instruction instruction(std::uint16_t pc) const {
         Instruction i{pc, {}};
+        i.bank = romBankAt(pc);
         for (unsigned j = 0; j < i.bytes.size(); ++j) {
             i.bytes[j] = inspect(std::uint16_t(pc + j));
         }
@@ -69,19 +100,28 @@ struct Engine::Impl {
         ++s.activity.instructions;
         ++s.executionCounts[pc];
         auto i = s.instruction(pc);
+        if (pc < 0x100 && s.bootMapped()) ++s.bootExecutions;
+        else if (pc < 0x8000 && i.bank < s.bankExecutions.size()) ++s.bankExecutions[i.bank];
         i.bytes[0] = opcode; // Actual fetched opcode; operands are storage observations.
         s.active = i;
         s.lastExecuted = i;
     }
+    std::size_t cartRamBytes() const {
+        std::size_t size = 0;
+        bankOf(GB_DIRECT_ACCESS_CART_RAM, &size);
+        return size;
+    }
     bool physical(std::uint16_t address) const {
         auto a = canonicalAddress(address);
         return (a >= 0x8000 && a < 0xA000) || (a >= 0xC000 && a < 0xE000) ||
-               (a >= 0xFE00 && a < 0xFEA0) || (a >= 0xFF80 && a < 0xFFFF);
+               (a >= 0xFE00 && a < 0xFEA0) || (a >= 0xFF80 && a < 0xFFFF) ||
+               (a >= 0xA000 && a < 0xC000 && cartRamBytes());
     }
     bool available(std::uint16_t address) const {
         auto a = canonicalAddress(address);
         return a < 0xA000 || (a >= 0xC000 && a < 0xE000) ||
-               (a >= 0xFE00 && a < 0xFEA0) || a >= 0xFF00;
+               (a >= 0xFE00 && a < 0xFEA0) || a >= 0xFF00 ||
+               (a >= 0xA000 && a < 0xC000 && cartRamBytes());
     }
     std::uint8_t inspect(std::uint16_t address) const {
         auto a = canonicalAddress(address);
@@ -89,12 +129,21 @@ struct Engine::Impl {
         GB_direct_access_t type;
         std::size_t offset;
         if (a < 0x8000) {
-            // Literal FF50's implementation returns only boot_rom_finished and
-            // does not synchronize a peripheral. General safe reads can sync
-            // PPU/APU and change a saved state, so do not use them elsewhere.
-            const bool mappedBoot = a < 0x100 && !(GB_safe_read_memory(instance, 0xFF50) & 1);
-            type = mappedBoot ? GB_DIRECT_ACCESS_BOOTROM : GB_DIRECT_ACCESS_ROM;
-            offset = a;
+            if (a < 0x100 && bootMapped()) { type = GB_DIRECT_ACCESS_BOOTROM; offset = a; }
+            else {
+                // The bank SameBoy maps into each 16 KiB window, as the CPU would see it.
+                type = a < 0x4000 ? GB_DIRECT_ACCESS_ROM0 : GB_DIRECT_ACCESS_ROM;
+                offset = std::size_t(bankOf(type)) * 0x4000 + (a & 0x3FFF);
+            }
+        }
+        else if (a >= 0xA000 && a < 0xC000) {
+            // Storage of the selected RAM bank, indexed like SameBoy's read path.
+            // Whether the CPU currently sees it depends on the MBC's RAM enable.
+            std::size_t size = 0;
+            const auto bank = bankOf(GB_DIRECT_ACCESS_CART_RAM, &size);
+            if (!size) return 0xFF;
+            type = GB_DIRECT_ACCESS_CART_RAM;
+            offset = ((a & 0x1FFF) + std::size_t(bank) * 0x2000) & (size - 1);
         }
         else if (a >= 0x8000 && a < 0xA000) { type = GB_DIRECT_ACCESS_VRAM; offset = a - 0x8000; }
         else if (a >= 0xC000 && a < 0xE000) { type = GB_DIRECT_ACCESS_RAM; offset = a - 0xC000; }
@@ -102,7 +151,7 @@ struct Engine::Impl {
         else if (a >= 0xFF80 && a < 0xFFFF) { type = GB_DIRECT_ACCESS_HRAM; offset = a - 0xFF80; }
         else if (a == 0xFFFF) { type = GB_DIRECT_ACCESS_IE; offset = 0; }
         else if (a >= 0xFF00 && a < 0xFF80) {
-            if (a == 0xFF50) return GB_safe_read_memory(instance, 0xFF50);
+            if (a == 0xFF50) return GB_safe_read_memory(instance, 0xFF50); // see bootMapped()
             type = GB_DIRECT_ACCESS_IO; offset = a - 0xFF00;
         }
         else return 0xFF; // No storage. Snapshot marks this unavailable, not an observed bus value.
@@ -125,7 +174,9 @@ struct Engine::Impl {
         event.instruction = s.active;
         event.address = address;
         event.canonicalAddress = canonicalAddress(address);
-        event.bank = address < 0x8000 ? address / 0x4000 : 0;
+        event.banksBefore = s.mapping;
+        event.bank = address < 0x4000 ? s.mapping.rom0 : address < 0x8000 ? s.mapping.rom :
+                     (address >= 0xA000 && address < 0xC000) ? s.mapping.ram : 0;
         event.physicalStorage = s.physical(address);
         event.valuesAvailable = s.available(address);
         event.before = s.inspect(address);
@@ -135,6 +186,8 @@ struct Engine::Impl {
     void clearMap() {
         std::fill(writeCounts.begin(), writeCounts.end(), 0);
         std::fill(executionCounts.begin(), executionCounts.end(), 0);
+        std::fill(bankExecutions.begin(), bankExecutions.end(), 0);
+        bootExecutions = romBankChanges = ramBankChanges = 0;
         mapStart = ticks;
     }
     StepResult atomic() {
@@ -145,14 +198,20 @@ struct Engine::Impl {
         auto elapsed = GB_run(&gb);
         ticks += elapsed;
         if (frameArrived) frameTick = ticks;
+        if (!bootDone && !bootMapped()) bootDone = true;
+        const auto after = banks();
+        romBankChanges += after.rom != mapping.rom || after.rom0 != mapping.rom0;
+        ramBankChanges += after.ram != mapping.ram;
         for (std::size_t j = 0; j < pendingCount; ++j) {
             auto event = pending[j];
             event.endTicks = ticks;
+            event.banksAfter = after;
             event.after = inspect(event.address);
             if (history.size() == capacity) { history.pop_front(); ++evicted; }
             history.push_back(event);
         }
         stepWrites = pendingCount;
+        mapping = after;
         return {active.has_value(), frameArrived, elapsed};
     }
 };
@@ -163,12 +222,15 @@ void Engine::loadTeaching() { loadRom(demo::rom); }
 void Engine::loadRom(std::span<const std::uint8_t> rom) {
     auto& s = *impl_;
     s.assertOwner();
-    if (rom.size() != 32768 || rom[0x147] != 0 || (rom[0x143] & 0x80)) {
-        throw std::invalid_argument("This slice accepts 32 KiB ROM-only monochrome DMG cartridges. Use the included teaching ROM.");
+    if (rom.size() < 0x150 || rom.size() > maxRomBytes) {
+        throw std::invalid_argument("Not a Game Boy ROM: a cartridge image holds a header at $0100-$014F and is at most 8 MiB.");
     }
     // Make a copy before resetting, including when restart() passes the existing vector.
     std::vector<std::uint8_t> copy(rom.begin(), rom.end());
-    s.teaching = std::equal(copy.begin(), copy.end(), demo::rom.begin());
+    auto same = [&](const auto& bundled) { return copy.size() == bundled.size() && std::equal(copy.begin(), copy.end(), bundled.begin()); };
+    s.teaching = same(demo::rom);
+    s.bankDemo = same(bankdemo::rom);
+    s.cartridge = describeCartridge(copy);
     if (s.inited) GB_free(&s.gb);
     // Stable startup noise for reproducible lessons; not a claim about power-on RAM.
     GB_random_seed(0x434F4E534F4C45ull);
@@ -189,11 +251,36 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     GB_load_boot_rom_from_buffer(&s.gb, demo::boot.data(), demo::boot.size());
     GB_load_rom_from_buffer(&s.gb, s.rom.data(), s.rom.size());
     s.ticks = s.instructions = s.frames = s.frameTick = s.eventId = s.evicted = s.previousFrame = 0;
+    std::size_t romSize = 0;
+    s.bankOf(GB_DIRECT_ACCESS_ROM, &romSize);
+    s.bankExecutions.assign(romSize / 0x4000, 0);
+    s.bootDone = false;
+    s.mapping = s.banks();
     s.history.clear(); s.active.reset(); s.lastExecuted.reset(); s.activity = {};
     s.held = 0; s.clearMap();
     s.frameKind = "No completed frame";
 }
-void Engine::restart() { loadRom(impl_->rom); }
+void Engine::restart() {
+    // Like switching a Game Boy off and on: the battery keeps cartridge RAM.
+    const auto battery = batteryData();
+    loadRom(impl_->rom);
+    if (!battery.empty()) loadBattery(battery);
+}
+std::vector<std::uint8_t> Engine::batteryData() const {
+    auto& s = *impl_; s.assertOwner();
+    if (!s.cartridge.battery) return {};
+    const int size = GB_save_battery_size(const_cast<GB_gameboy_t*>(&s.gb));
+    if (size <= 0) return {};
+    std::vector<std::uint8_t> data(static_cast<std::size_t>(size));
+    GB_save_battery_to_buffer(const_cast<GB_gameboy_t*>(&s.gb), data.data(), data.size());
+    return data;
+}
+void Engine::loadBattery(std::span<const std::uint8_t> data) {
+    auto& s = *impl_; s.assertOwner();
+    if (s.cartridge.battery && !data.empty()) GB_load_battery_from_buffer(&s.gb, data.data(), data.size());
+}
+bool Engine::batteryDirty() const { impl_->assertOwner(); return GB_get_battery_dirty(const_cast<GB_gameboy_t*>(&impl_->gb)); }
+void Engine::clearBatteryDirty() { impl_->assertOwner(); GB_clear_battery_dirty(&impl_->gb); }
 void Engine::setButton(Button button, bool down) {
     impl_->assertOwner();
     GB_set_key_state(&impl_->gb, static_cast<GB_key_t>(button), down);
@@ -231,19 +318,48 @@ StepResult Engine::stepFrame() {
     return {false, false, ticks() - start};
 }
 WatchResult Engine::runUntilWrite(std::uint16_t address, std::uint64_t limitTicks) {
+    return runUntilWrite(address, address, limitTicks);
+}
+WatchResult Engine::runUntilWrite(std::uint16_t first, std::uint16_t last, std::uint64_t limitTicks) {
     auto& s = *impl_; s.assertOwner();
     WatchResult result;
     if (!s.traceEnabled) { result.stop = WatchResult::Stop::CaptureOff; return result; }
-    const auto target = canonicalAddress(address);
+    const auto low = canonicalAddress(first), high = canonicalAddress(last);
     const auto ticks0 = s.ticks, instructions0 = s.instructions, frames0 = s.frames;
+    result.banksBefore = s.mapping;
     for (unsigned calls = 0; calls < 4000000 && s.ticks - ticks0 < limitTicks && !result.write; ++calls) {
         s.atomic();
         // This step's records are the newest; capacity (>= 8) always retains them.
         for (auto i = s.history.size() - std::min(s.stepWrites, s.history.size()); i < s.history.size(); ++i) {
-            if (s.history[i].canonicalAddress == target) { result.write = s.history[i]; break; }
+            const auto a = s.history[i].canonicalAddress;
+            if (a >= low && a <= high) { result.write = s.history[i]; break; }
         }
     }
     result.stop = result.write ? WatchResult::Stop::Write : WatchResult::Stop::Limit;
+    result.banksAfter = s.mapping;
+    result.advancedTicks = s.ticks - ticks0;
+    result.instructions = s.instructions - instructions0;
+    result.frames = s.frames - frames0;
+    return result;
+}
+WatchResult Engine::runUntilBankChange(std::uint64_t limitTicks) {
+    auto& s = *impl_; s.assertOwner();
+    WatchResult result;
+    const auto ticks0 = s.ticks, instructions0 = s.instructions, frames0 = s.frames;
+    bool changed = false;
+    for (unsigned calls = 0; calls < 4000000 && s.ticks - ticks0 < limitTicks && !changed; ++calls) {
+        result.banksBefore = s.mapping;
+        s.atomic();
+        changed = s.mapping != result.banksBefore;
+    }
+    result.banksAfter = s.mapping;
+    result.stop = changed ? WatchResult::Stop::BankChange : WatchResult::Stop::Limit;
+    if (changed && s.traceEnabled) {
+        // The controller write that caused it, when capture saw this step.
+        for (auto i = s.history.size() - std::min(s.stepWrites, s.history.size()); i < s.history.size(); ++i) {
+            if (s.history[i].address < 0x8000) result.write = s.history[i];
+        }
+    }
     result.advancedTicks = s.ticks - ticks0;
     result.instructions = s.instructions - instructions0;
     result.frames = s.frames - frames0;
@@ -271,7 +387,12 @@ Snapshot Engine::snapshot(std::uint16_t memoryBase) {
     out.frameBoundaryTicks = s.frameTick; out.frameKind = s.frameKind;
     out.evictedWrites = s.evicted;
     out.oldestRetainedTick = s.history.empty() ? s.ticks : s.history.front().startTicks;
-    out.teaching = s.teaching; out.traceEnabled = s.traceEnabled;
+    out.teaching = s.teaching; out.bankDemo = s.bankDemo; out.traceEnabled = s.traceEnabled;
+    out.cartridge.info = s.cartridge;
+    out.cartridge.banks = s.mapping;
+    s.bankOf(GB_DIRECT_ACCESS_ROM, &out.cartridge.romBytes);
+    out.cartridge.ramBytes = s.cartRamBytes();
+    out.cartridge.bootMapped = s.bootMapped();
     out.memoryBase = std::min<std::uint16_t>(memoryBase, 0xFF80);
     for (unsigned i = 0; i < out.memory.size(); ++i) {
         out.memory[i] = s.inspect(out.memoryBase + i);
@@ -290,8 +411,8 @@ Snapshot Engine::snapshot(std::uint16_t memoryBase) {
     v.obp1 = s.inspect(0xFF49); v.wy = s.inspect(0xFF4A); v.wx = s.inspect(0xFF4B);
     out.playerX = s.inspect(demo::player_x); out.playerY = s.inspect(demo::player_y);
     out.buttons = s.inspect(demo::buttons); out.heldButtons = s.held;
-    out.pixels = s.completed;
-    out.previousPixels = s.previous; out.previousFrame = s.previousFrame;
+    out.pixels.assign(s.completed.begin(), s.completed.end());
+    out.previousPixels.assign(s.previous.begin(), s.previous.end()); out.previousFrame = s.previousFrame;
     out.writes.assign(s.history.begin(), s.history.end());
     out.activity = s.activity; out.activity.endTicks = s.ticks;
     s.activity = {}; s.activity.startTicks = s.ticks;
@@ -308,6 +429,8 @@ void Engine::activityMap(ActivityMap& out) const {
     const auto& s = *impl_; s.assertOwner();
     out.startTicks = s.mapStart; out.endTicks = s.ticks; out.writesObserved = s.traceEnabled;
     out.writes = s.writeCounts; out.executions = s.executionCounts;
+    out.bankExecutions = s.bankExecutions; out.bootExecutions = s.bootExecutions;
+    out.romBankChanges = s.romBankChanges; out.ramBankChanges = s.ramBankChanges;
 }
 void Engine::clearActivityMap() { impl_->assertOwner(); impl_->clearMap(); }
 std::uint8_t Engine::heldButtons() const { impl_->assertOwner(); return impl_->held; }

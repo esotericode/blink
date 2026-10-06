@@ -1,4 +1,5 @@
 #include "ui/activity_map.hpp"
+#include "ui/cartridge_view.hpp"
 #include "ui/game_view.hpp"
 #include "ui/main_window.hpp"
 #include "ui/system_diagram.hpp"
@@ -11,11 +12,14 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
+#include <QUrl>
 #include <iostream>
 #include <stdexcept>
 
@@ -24,11 +28,16 @@ void require(bool ok, const char* message) { if (!ok) throw std::runtime_error(m
 
 int main(int argc, char** argv) {
     QApplication app(argc,argv);
+    // Battery saves of the bundled demo go to a throwaway test location.
+    QStandardPaths::setTestModeEnabled(true);
+    QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)+"/bankdemo.sav");
     MainWindow window; window.show(); QTest::qWait(50);
     // Optional third argument: a directory for screenshots of each lesson step and inspector tab.
     const QString shots = argc > 3 ? QString::fromLocal8Bit(argv[3]) : QString();
     auto shot = [&](const QString& name) {
-        if (!shots.isEmpty()) require(window.grab().save(QDir(shots).filePath(name)),"Screenshot could not be saved");
+        if (shots.isEmpty()) return;
+        QTest::qWait(30); // let pending layout requests run, as they would on screen
+        require(window.grab().save(QDir(shots).filePath(name)),"Screenshot could not be saved");
     };
     try {
         auto* game=window.findChild<GameView*>("gameView");
@@ -151,9 +160,86 @@ int main(int argc, char** argv) {
         const auto path=dir.filePath("other.gb");
         { QFile f(path); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(modified.data()),modified.size())==qint64(modified.size()),"Fixture write failed"); }
         window.loadFile(path);
-        require(!window.displayedSnapshot().teaching && window.lessonStep()==LessonStep::NeedsTeachingRom && action->text().contains("teaching ROM"),"Unannotated ROM lesson state wrong");
+        require(!window.displayedSnapshot().teaching && window.lessonStep()==LessonStep::NeedsTeachingRom && action->text().contains("teaching game"),"Unannotated ROM lesson state wrong");
         action->click();
         require(window.displayedSnapshot().teaching && window.lessonStep()==LessonStep::Start,"Lesson could not reload the teaching ROM");
+
+        // Cartridge panel for the teaching ROM: no MBC, so nothing switches.
+        auto* cartridgeDock=window.findChild<QDockWidget*>("cartridgeDock");
+        auto* facts=window.findChild<QLabel*>("cartridgeFacts");
+        auto* explanation=window.findChild<QLabel*>("cartridgeExplanation");
+        auto* switches=window.findChild<QTableWidget*>("bankSwitchTable");
+        auto* bankButton=window.findChild<QPushButton*>("runUntilBankChangeButton");
+        auto* windowLabel=window.findChild<QLabel*>("memoryWindowLabel");
+        auto* cpuText=window.findChild<QLabel*>("instructionLabel");
+        require(cartridgeDock && facts && explanation && switches && bankButton && windowLabel && window.findChild<BankMap*>("bankMap"),"Cartridge controls absent");
+        emit diagram->blockActivated(SystemDiagram::Block::Cartridge); QTest::qWait(20);
+        require(!cartridgeDock->visibleRegion().isEmpty(),"Diagram cartridge block did not open the Cartridge panel");
+        require(facts->text().contains("ROM ONLY") && explanation->text().contains("no memory bank controller") && !bankButton->isEnabled(),"No-MBC cartridge description wrong");
+        shot("tab-cartridge-teaching.png");
+
+        // Bundled MBC1 demo: the lesson presses A and stops at the real bank switch.
+        window.loadBankDemo();
+        const auto demoStart=window.displayedSnapshot();
+        require(demoStart.bankDemo && demoStart.cartridge.banks.rom==1 && window.lessonStep()==LessonStep::BankDemo,"Bank demo did not start ready");
+        require(!cartridgeDock->visibleRegion().isEmpty() && facts->text().contains("MBC1+RAM+BATTERY") && bankButton->isEnabled(),"Bank demo cartridge panel wrong");
+        require(windowLabel->isVisible() && windowLabel->text().contains("ROM bank 1") && memory->item(0,1)->text().startsWith(QString::fromStdString(hex(bankdemo::rom[0x4000],2)).mid(1)),
+                "Switchable window does not show bank 1 storage");
+        shot("bank-0-start.png");
+        action->click();
+        auto switched=window.displayedSnapshot();
+        require(window.lessonStep()==LessonStep::BankSwitched && switched.cartridge.banks.rom==2 && switched.next.pc==bankdemo::call_bank,"Bank lesson did not stop after the switch");
+        require(body->text().contains("LD [$2000], A") && body->text().contains("<b>1</b> to <b>2</b>"),"Bank lesson text lacks real evidence");
+        require(switches->rowCount()>0 && switches->item(0,2)->text().startsWith("$2000 ← $02") && switches->item(0,3)->text()=="ROM bank 1 → 2","Bank switch list wrong");
+        require(windowLabel->text().contains("ROM bank 2") && memory->item(0,1)->text().startsWith(QString::fromStdString(hex(bankdemo::rom[2*0x4000],2)).mid(1)),
+                "Memory panel did not follow the bank switch");
+        require(diagram->highlightedPaths().count(SystemDiagram::Path::RomCpu)==1,"Diagram does not show the cartridge path");
+        shot("bank-1-switched.png");
+        instruction->trigger();
+        require(window.displayedSnapshot().next.pc==0x4000 && window.displayedSnapshot().next.bank==2 && cpuText->text().contains("$4000 bank 2"),
+                "CPU panel does not name the bank of banked code");
+        // Writer evidence for an MBC write names the register and its effect.
+        window.selectAddress(0x2000);
+        require(writer->text().contains("command") && writer->text().contains("ROM bank 1 → 2"),"MBC writer text wrong");
+        action->click();
+        require(window.displayedSnapshot().cartridge.banks.rom==3,"Second press did not select bank 3");
+        // The panel's own button: without a new press, nothing switches within the limit.
+        auto none=window.runUntilBankChange();
+        require(none.stop==WatchResult::Stop::Limit && window.displayedSnapshot().cartridge.banks.rom==3,"Run until bank change stopped without a change");
+        // Battery-backed RAM reaches a .sav file.
+        require(window.saveBattery(),"Battery save failed");
+        { QFile sav(window.batteryPath()); require(sav.open(QIODevice::ReadOnly),"No .sav written");
+          const auto data=sav.readAll(); require(data.size()==8192 && std::uint8_t(data[1])==0x42 && std::uint8_t(data[0])==2,"Saved cartridge RAM wrong"); }
+
+        // An arbitrary MBC5 cartridge from disk with an existing save, opened by drag and drop.
+        std::vector<std::uint8_t> mbc5(bankdemo::rom.begin(),bankdemo::rom.end());
+        mbc5.resize(128*1024,0xFF); mbc5[0x147]=0x1B; mbc5[0x148]=0x02;
+        const auto romPath=dir.filePath("mbc5 demo.gb");
+        { QFile f(romPath); require(f.open(QIODevice::WriteOnly) && f.write(reinterpret_cast<const char*>(mbc5.data()),qint64(mbc5.size()))==qint64(mbc5.size()),"Fixture write failed"); }
+        { QByteArray save(8192,'\0'); save[0]=7; save[1]=0x42; QFile f(dir.filePath("mbc5 demo.sav")); require(f.open(QIODevice::WriteOnly) && f.write(save)==save.size(),"Save fixture failed"); }
+        QMimeData mime; mime.setUrls({QUrl::fromLocalFile(romPath)});
+        // Qt delivers a drop to the widget that accepted the drag's entry.
+        QDragEnterEvent enter(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(&window,&enter);
+        require(enter.isAccepted(),"Window refused a ROM drag");
+        QDropEvent drop(QPointF(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(&window,&drop);
+        auto opened=window.displayedSnapshot();
+        require(opened.cartridge.info.mbc==Mbc::Mbc5 && !opened.bankDemo && window.lessonStep()==LessonStep::NeedsTeachingRom && opened.instructions==0,"Dropped ROM not loaded paused at power-on");
+        require(window.engine().inspect(bankdemo::saved_count)==7 && window.batteryPath()==dir.filePath("mbc5 demo.sav"),"Existing .sav not loaded");
+        require(!regs->item(0,5)->text().contains("Δ"),"A new game's registers were compared with the previous game");
+        require(facts->text().contains("MBC5") && facts->text().contains("8 banks") && windowLabel->isVisible()==false,"MBC5 facts wrong");
+        window.setMemoryBase(0x4000);
+        require(windowLabel->text().contains("ROM bank 1") && windowLabel->text().contains("$004000"),"Window label lacks the file offset");
+        window.findChild<QDockWidget*>("memoryDock")->raise();
+        shot("tab-memory-banked.png");
+        game->setFocus(); QTest::keyPress(game,Qt::Key_Z);
+        bankButton->click();
+        QTest::keyRelease(game,Qt::Key_Z);
+        require(window.displayedSnapshot().cartridge.banks.rom==2 && switches->item(0,3)->text()=="ROM bank 1 → 2","MBC5 bank change not shown");
+        frame->trigger(); frame->trigger();
+        window.loadTeaching(); // switching games saves the battery first
+        { QFile sav(dir.filePath("mbc5 demo.sav")); require(sav.open(QIODevice::ReadOnly) && std::uint8_t(sav.readAll()[0])==8,"Battery not saved when switching games"); }
 
         // Screenshots for documentation: mid-lesson, where the outline leads the picture.
         if (argc>1) {
@@ -167,10 +253,13 @@ int main(int argc, char** argv) {
         if (argc>2) {
             window.resize(window.minimumSize()); window.resetLayout(); QTest::qWait(30);
             require(window.grab().save(QString::fromLocal8Bit(argv[2])),"Minimum-size screenshot could not be saved");
+            window.loadBankDemo();
+            shot("minimum-cartridge.png");
         }
         std::cout << "PASS Qt " << qVersion() << " / " << qPrintable(QGuiApplication::platformName())
                   << ": native widgets, input/focus, run/pause, instruction/frame, run-until-written, synchronized inspectors, writer selection, "
-                     "guided lesson (hold → WRAM store → OAM store → frame → tile), tile/OAM/activity panels; UI heartbeats=" << heartbeats << "\n";
+                     "guided lesson (hold → WRAM store → OAM store → frame → tile), tile/OAM/activity panels, cartridge/bank panel, "
+                     "bank-switch lesson, MBC writer text, any-ROM drop loading, battery .sav load/save; UI heartbeats=" << heartbeats << "\n";
     } catch(const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
     return 0;
 }

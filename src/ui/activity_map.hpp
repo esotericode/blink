@@ -1,5 +1,6 @@
 #pragma once
 #include "emulator/state.hpp"
+#include "teaching/annotations.hpp"
 #include <QWidget>
 #include <optional>
 
@@ -15,7 +16,7 @@ class ActivityMapView : public QWidget {
 public:
     enum class Mode { Writes, Executions, Both };
     explicit ActivityMapView(QWidget* parent = nullptr);
-    void setMap(const ActivityMap& map, bool teaching);
+    void setMap(const ActivityMap& map, Program program);
     void setMode(Mode mode);
     void setSelectedPage(int page);
     void setSelectedAddress(std::uint16_t address);
@@ -43,14 +44,14 @@ private:
     std::uint16_t selected_ = 0xC000;
     std::optional<std::uint16_t> hover_;
     double logMaxWrites_ = 0, logMaxExecutions_ = 0;
-    bool teaching_ = false;
+    Program program_ = Program::Other;
 };
 
 class ActivityPanel : public QWidget {
     Q_OBJECT
 public:
     explicit ActivityPanel(QWidget* parent = nullptr);
-    void setMap(const ActivityMap& map, bool teaching);
+    void setMap(const ActivityMap& map, Program program);
     ActivityMapView* view() const { return view_; }
 signals:
     void clearRequested();

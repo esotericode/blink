@@ -29,11 +29,32 @@ int lessonStepNumber(LessonStep step) {
 LessonPage lessonPage(LessonStep step, const Snapshot& s, const LessonEvidence& e) {
     switch (step) {
     case LessonStep::NeedsTeachingRom:
-        return {"This lesson needs the bundled teaching ROM",
-                "The stops and variable names in this lesson come from the teaching ROM's own source. "
-                "With another ROM the hardware views, captured writes, and <b>Run until written</b> still work, "
-                "but no game variables are named.",
-                "Load the teaching ROM"};
+        return {"Exploring your own ROM",
+                "Every panel shows this game's real state: CPU, memory, sprites and tiles, the memory map, and the "
+                "<b>Cartridge</b> panel, which shows which ROM and RAM banks the CPU can see right now and every bank switch. "
+                "Try <b>Run until the bank changes</b> there, or select a byte and press <b>F9</b>.<br><br>"
+                "Game variables are not named: names come only from the bundled programs' own source. "
+                "The guided button-press lesson uses the bundled teaching game.",
+                "Load the teaching game"};
+    case LessonStep::BankDemo:
+        return {"Bank-switching demo",
+                "This original cartridge has an MBC1 chip and four 16 KiB ROM banks. Banks 1, 2, and 3 each keep their "
+                "own routine at the <b>same address</b>, " + code("$4000") + ". Each press of A writes the next bank "
+                "number to " + code("$2000") + " and then calls " + code("$4000") + ", so the screen pattern shows "
+                "which bank's code ran.<br><br>The <b>Cartridge</b> panel shows the CPU's windows and the cartridge's "
+                "banks. The button below presses A for you and stops right after the bank changes.",
+                "Press A and stop at the bank switch"};
+    case LessonStep::BankSwitched: {
+        const auto written = e.write ? value(e.write->requested) : std::string("?");
+        return {"The MBC switched banks",
+                writer(e) + " wrote <b>" + written + "</b> to " + code(e.write ? hex(e.write->address) : std::string("$2000")) +
+                ". ROM cannot change, so the MBC1 chip treated the write as a command: the bank at " + code("$4000-$7FFF") +
+                " changed from <b>" + std::to_string(e.banksBefore.rom) + "</b> to <b>" + std::to_string(e.banksAfter.rom) +
+                "</b> (the " + mark("pink") + " connector in the Cartridge panel). " + effort(e) + "<br><br>"
+                "The next instruction, " + code("CALL $4000") + ", jumps to the same address as last time but now runs bank " +
+                std::to_string(e.banksAfter.rom) + "'s copy of the routine. Run (F5) to see its pattern, or press A again.",
+                "Press A again"};
+    }
     case LessonStep::Start:
         return {"Follow one press of Right",
                 "Watch a button press travel through the machine:<br><b>joypad → CPU → WRAM (" + code("player_x") +

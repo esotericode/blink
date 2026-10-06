@@ -36,6 +36,14 @@ Build a standalone native desktop application that connects a running game's beh
   framework unless measurements expose a real requirement.
 - Teaching semantics require exact ROM-byte identity, not a matching filename.
   Editing assembly regenerates binary/header/symbols via the same Python tool.
+  Any user ROM loads, but it gets hardware facts and real events only, never
+  invented variable names.
+- Banks: read the mapping and banked storage only through
+  `GB_get_direct_access` (it reports the bank). Writes below `$8000` are MBC
+  commands; show their effect from `banksBefore`/`banksAfter`, not ROM bytes.
+  The RAM-enable latch is not public: label cartridge RAM as storage.
+- Keep `Snapshot` small on the stack (frames are heap vectors): MinGW's main
+  thread has 2 MiB, and a 190 KB snapshot overflowed it under Windows.
 - Run the four CTest suites after emulator/observation changes. Run
   `xvfb-run -a ./build/widget_tests` for native X11 UI changes; offscreen tests
   alone do not establish compositor behavior. Inspect rendered layouts:
@@ -53,9 +61,13 @@ Build a standalone native desktop application that connects a running game's beh
   `third_party/sameboy`; intentional upstream upgrades require a new pin,
   manifest, callback review, parity results, and updated dependency notices.
 - Implemented: the pause-on-write movement lesson, sprite/tile bit-plane
-  inspector, memory activity map, and system overview. Next: an interrupt and
-  timer lesson and a background-map view. Replay, commercial-ROM support, DMA,
-  audio playback, and macOS are not implemented.
+  inspector, memory activity map, system overview, loading any
+  SameBoy-supported cartridge with battery `.sav` files, the Cartridge/bank
+  panel, and the bank-switching demo and lesson. Next: an observed OAM DMA
+  record (from the captured `$FF46` write), then an interrupt and timer lesson
+  and a background-map view. Replay, save states, CGB mode, DMA tracing,
+  audio playback, and macOS are not implemented; commercial-game
+  compatibility is SameBoy's and not surveyed here.
 
 ## Leave useful continuity
 

@@ -27,10 +27,21 @@ advanced state. Frame step reaches the next output callback, with a four-frame
 ## Inspection
 
 Use public `GB_get_registers` and `GB_get_direct_access`; no internal fields are
-accessed or patched. ROM/boot, VRAM, WRAM, OAM, HRAM, interrupt enable, and IO raw
-storage are read directly. `$E000–$FDFF` aliases `$C000–$DDFF` in the DMG view.
-No cartridge RAM or inaccessible OAM padding is presented as observed storage.
-ROM bank 0/1 is fixed; no MBC support is promised by the adapter.
+accessed or patched. ROM/boot, VRAM, WRAM, OAM, HRAM, interrupt enable, IO raw
+storage, and cartridge RAM are read directly. `$E000–$FDFF` aliases
+`$C000–$DDFF` in the DMG view. Inaccessible OAM padding, and `$A000–$BFFF` on
+cartridges without RAM, are shown as no storage.
+
+`GB_get_direct_access` also reports the bank mapped into each cartridge
+window (`ROM0` at `$0000`, `ROM` at `$4000`, `CART_RAM` at `$A000`). `$0000–$7FFF`
+reads ROM storage at `bank × $4000 + (address & $3FFF)`, or the boot program at
+`$0000–$00FF` while it is mapped. `$A000–$BFFF` reads the selected RAM bank at
+`((address & $1FFF) + bank × $2000) & (size − 1)`, matching SameBoy's read path.
+That is storage, not a CPU read: the public API does not expose the MBC's RAM
+enable or a selected clock/sensor register, so while RAM is disabled (or an
+MBC3/HuC3/TPP1 clock register is selected) the CPU would read something else.
+The UI states this. MMM01 rearranges ROM in emulator memory, so file offsets
+derived from bank numbers are approximate for it.
 
 One source-verified exception: `GB_safe_read_memory(gb, $FF50)` obtains the boot
 mapping flag. The pinned implementation only returns `boot_rom_finished` with
@@ -87,6 +98,32 @@ limit (one emulated second from the UI, two to four frames in the lesson) it
 stops at the first boundary past the limit. A test proves the full state
 equals untraced instruction stepping by the same number of opcodes.
 
+## Cartridge banks and battery RAM
+
+The mapping (`BankMapping`: ROM bank at `$0000`, at `$4000`, RAM bank) is read
+after every atomic step. A step that ends with a different mapping counts as
+a ROM or RAM bank change; this is the same step granularity as all other
+events, and the instruction that caused it is the controller write captured
+in that step (when capture is on). Every write record carries the mapping
+when the attempt was made and at the end of its step, and the bank of the
+window it addressed. Writes to `$0000–$7FFF` are MBC commands on banked
+cartridges and are ignored without an MBC; their "before/after" bytes are
+ROM storage and are not presented as an effect.
+
+`Engine::runUntilBankChange(limit)` repeats atomic steps until one changes the
+mapping, then stops at that step's end boundary (one emulated second from the
+UI, four frames in the bank lesson). It does not require capture. The
+execution callback attributes each opcode start below `$8000` to the bank
+mapped at its PC (boot-program opcodes are counted separately); the
+instruction record carries that bank, so banked code is disassembled from the
+right bank and labelled with it.
+
+Battery-backed RAM (and clock state) uses SameBoy's `GB_save_battery_to_buffer`
+/ `GB_load_battery_from_buffer` / `GB_get_battery_dirty`. Restart reloads the
+same cartridge and restores battery RAM, like a power cycle. The UI writes the
+buffer to `<rom folder>/<rom name>.sav`; that is file I/O outside emulation and
+does not change the emulated state.
+
 ## Video storage, previous output, and input
 
 Each snapshot copies VRAM (8 KiB DMG), OAM (160 bytes), and LCDC, STAT, SCY,
@@ -122,11 +159,13 @@ DMA or PPU fetches, which the CPU hooks do not see.
 | CPU execution, memory/hardware behavior, framebuffer production | unchanged SameBoy core |
 | core lifecycle, pacing primitives, inspection, bounded event capture | `src/emulator/engine.*` |
 | copied state/event structures and safe-byte disassembly | `src/emulator/state.hpp`, `disassembly.cpp` |
+| cartridge header facts and MBC register names (no emulation) | `src/emulator/cartridge.*` |
 | pure tile, OAM, and palette decoding of copied storage | `src/emulator/graphics.*` |
 | semantic names, curated source notes, region names | `src/teaching/annotations.*`, generated symbols |
-| guided lesson text from real evidence | `src/teaching/lesson.*` |
+| guided lesson text from real evidence (button press, bank switch) | `src/teaching/lesson.*` |
 | native controls, presentation, wall-clock scheduling, input focus | `src/ui/*` |
-| reproducible original cartridge and boot | `rom/*`, `tools/assemble_rom.py` |
+| reproducible original cartridges (teaching, bank demo) and boot | `rom/*`, `tools/assemble_rom.py` |
+| battery `.sav` files, ROM file loading | `src/ui/main_window.cpp` |
 
 No plugin registry or generalized multi-console platform is needed for this
 slice. Future hooks must specify their source, clock convention, and coverage

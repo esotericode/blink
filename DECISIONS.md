@@ -50,6 +50,7 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   IRQ writes without an opcode callback have no instruction identity.
 - Restrict loading to 32 KiB ROM-only DMG to make mapping/aliases explicit.
   General commercial compatibility, MBC, and automatic game metadata are deferred.
+  (Superseded on 2026-10-06: any cartridge loads; see the last section.)
 - Ubuntu packaging uses a `.deb` with OS Qt shared dependencies. Original
   ROM/boot/assembler/notices are included. The installed binary has no build
   RUNPATH and starts the embedded game from any directory. Clean-machine
@@ -119,3 +120,67 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   laptops. Layout is not persisted between sessions yet.
 - Enter on a focused button now activates it instead of becoming Game Boy
   Start; elsewhere Enter remains Start.
+
+## 2026-10-06 — Any cartridge, with banks made visible
+
+- The 32 KiB ROM-only limit was this project's own first-slice choice, not a
+  SameBoy limit. Users wanted to open their own games, so it is lifted:
+  `Engine::loadRom` accepts 0x150 bytes to 8 MiB (the largest MBC5 image),
+  bounded before allocation. The header decoder in `emulator/cartridge.*`
+  mirrors SameBoy's type table and its header/file-mismatch heuristics
+  (no-MBC files over 32 KiB run as MBC3; MMM01 detected from the trailing
+  header) so the UI describes what the core will actually do. MBC6, TAMA5,
+  and unknown types are refused before the current game is replaced.
+- Banks are inspected only through public `GB_get_direct_access`, whose bank
+  output reports the bank mapped at `$0000`, `$4000`, and `$A000`. Inspection
+  at `$0000–$7FFF` indexes ROM at `bank × $4000`; cartridge RAM uses
+  SameBoy's own read-path indexing (`(a & $1FFF) + bank × $2000`, masked to the
+  RAM size). The public API does not expose the RAM-enable latch or a selected
+  clock register, so the view shows storage and says so, rather than guessing
+  what a CPU read would return. The full-state purity test now also runs with
+  bank 2 mapped and cartridge RAM present.
+- Mapping changes are detected by comparing the mapping before and after each
+  atomic `GB_run` step, which is the existing time granularity. Each write
+  record carries the mapping at the attempt and at the step's end, so a write
+  to `$2000` is shown as an MBC command with its effect (`ROM bank 1 → 2`)
+  instead of ROM "before/after" bytes, which are meaningless there.
+  `runUntilBankChange` stops at the end of the step that changed the mapping;
+  it works with capture off, and with capture on it returns that step's
+  controller write. Opcode starts are also counted per ROM bank, because the
+  per-address map cannot distinguish banks at `$4000–$7FFF`.
+- The original boot now leaves the documented DMG post-boot state (Pan Docs
+  "Power Up Sequence": registers, LCDC = `$91`, BGP, sound registers, cleared
+  VRAM; F depends on the header checksum). The previous minimal boot left the
+  LCD off, and real games commonly wait for LY ≥ 144 before turning the LCD
+  off, which never happens with the LCD already off. The teaching ROM's bytes
+  and behaviour are unchanged; its warm-up still ends on a visible frame.
+- Battery RAM uses SameBoy's buffer API, so `.sav` files are SameBoy's format
+  (raw RAM, plus a clock footer for clock cartridges). Saves go next to the
+  ROM with the same base name, written with `QSaveFile` (atomic replace) every
+  ~3 s while the core reports them dirty, before another game is loaded, and
+  on exit. The bundled bank demo saves under the per-user application data
+  folder. Restart keeps battery RAM, as a power cycle would.
+- Teaching value without inventing semantics: arbitrary ROMs get hardware
+  facts (controller, banks, register names from Pan Docs) and real events,
+  never variable names. A second original cartridge, `rom/bankdemo.asm`
+  (MBC1, banks 1–3 each with a routine at `$4000`), gives a source-annotated
+  bank lesson; it is identified by exact bytes like the teaching ROM. The
+  assembler gained `BANK n`, generic encodings, and per-bank symbols.
+- The machine stays DMG. CGB-only cartridges are allowed to load (they show
+  their own "needs Color" screen on real DMG hardware too) and are labelled;
+  CGB mode, SGB borders/palettes, and audio playback remain out of scope.
+- UI: a "Cartridge · banks" dock (tabbed with Memory) holds a painted bank map
+  (CPU windows → bank grid, connectors in the window colours), the
+  explanation, counters, and the controller-write list. Rendered review at
+  980×680 showed the panel could not fit, so it scrolls instead of
+  overlapping; at the default size everything fits. Version 0.3.0.
+- Windows (Wine) exposed a stack overflow: `Snapshot` carried two 92 KB
+  frames inline, and the extended widget test plus the load path stacked ten
+  of them against MinGW's 2 MiB main-thread stack. Frames are now heap-backed
+  vectors with the same element access, so copies stay cheap on any stack;
+  semantics and tests are unchanged. Per-step bank reads cost about 15% of
+  traced emulation speed (still about 10× real time); accepted for now.
+- Next: with real games loadable, sprite writes by OAM DMA are the largest gap
+  in "who wrote this". The CPU's write to `$FF46` is already captured, so an
+  honest "OAM copied by DMA from page $xx, requested at …" record is a small,
+  verifiable step and is proposed ahead of the interrupt/timer lesson.

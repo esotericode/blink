@@ -15,7 +15,7 @@ namespace observatory {
 namespace {
 using style::q;
 struct Band { int page; const char* label; };
-const Band bands[] = {{0x00, "$0000 ROM0"}, {0x40, "$4000 ROM1"}, {0x80, "$8000 VRAM"}, {0xA0, "$A000 cart RAM"},
+const Band bands[] = {{0x00, "$0000 ROM0"}, {0x40, "$4000 ROMX"}, {0x80, "$8000 VRAM"}, {0xA0, "$A000 cart RAM"},
                       {0xC0, "$C000 WRAM"}, {0xE0, "$E000 echo"}, {0xFE, "$FE00 OAM/IO"}};
 QColor tint(std::uint16_t a) {
     if (a < 0x8000) return QColor("#1c2a33");
@@ -42,8 +42,8 @@ ActivityMapView::ActivityMapView(QWidget* parent) : QWidget(parent) {
     map_.writes.assign(0x10000, 0); map_.executions.assign(0x10000, 0);
     rebuild();
 }
-void ActivityMapView::setMap(const ActivityMap& map, bool teaching) {
-    map_ = map; teaching_ = teaching;
+void ActivityMapView::setMap(const ActivityMap& map, Program program) {
+    map_ = map; program_ = program;
     rebuild();
 }
 void ActivityMapView::setMode(Mode mode) { mode_ = mode; rebuild(); }
@@ -162,7 +162,7 @@ void ActivityMapView::paintEvent(QPaintEvent*) {
     outline(selected_, style::highlight, 2);
     if (hover_) outline(*hover_, style::accent, 1);
     const auto shown = hover_.value_or(selected_);
-    auto name = addressName(shown, teaching_);
+    auto name = addressName(shown, program_);
     QString info = q(hex(shown)) + (name.empty() ? QString() : "  " + q(name)) + "\n" + q(regionName(shown)) +
         QString("\n%1 write attempts · %2 opcode starts").arg(map_.writes[shown]).arg(map_.executions[shown]);
     painter.setPen(style::text);
@@ -205,13 +205,14 @@ ActivityPanel::ActivityPanel(QWidget* parent) : QWidget(parent) {
     });
     connect(clear, &QPushButton::clicked, this, &ActivityPanel::clearRequested);
 }
-void ActivityPanel::setMap(const ActivityMap& map, bool teaching) {
+void ActivityPanel::setMap(const ActivityMap& map, Program program) {
     const auto frames = double(map.endTicks - map.startTicks) / 140448.0;
     interval_->setText(QString("Per-address CPU activity over t = %1 … %2 ticks (≈ %3 frame periods). "
                                "<span style='color:%4'>Amber: write attempts</span>%5; <span style='color:%6'>blue: opcode starts</span>. "
-                               "Reads, DMA and PPU fetches are not counted. Rows are 256-byte pages.")
+                               "Reads, DMA and PPU fetches are not counted. Rows are 256-byte pages; $4000–$7FFF combines every ROM bank "
+                               "(the Cartridge panel splits activity by bank).")
         .arg(map.startTicks).arg(map.endTicks).arg(frames, 0, 'f', 1).arg(style::write.name())
         .arg(map.writesObserved ? "" : " (capture off: none counted)").arg(style::execute.name()));
-    view_->setMap(map, teaching);
+    view_->setMap(map, program);
 }
 }

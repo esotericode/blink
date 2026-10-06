@@ -8,9 +8,15 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
   6.8.3 MinGW on Windows CI, 6.4.2 MinGW cross build under Wine), CMake.
   SameBoy 1.0.3 DMG-B core is vendored at
   `208ba4afabffab9edde416f2dbb8ae459e34adb8`, with no upstream modifications.
-- Original source-built teaching ROM and minimal original boot are embedded.
+- Original source-built teaching ROM, bank-switching demo (MBC1), and an
+  original boot that leaves the documented DMG post-boot state are embedded.
   Arrow input updates named WRAM position variables and a visible star sprite.
   Normal use is offline and native, with no web modules/services.
+- Any Game Boy ROM the user owns opens (up to 8 MiB, every controller SameBoy
+  emulates), with battery `.sav` files. A Cartridge panel shows the CPU's
+  windows, every ROM/RAM bank, the live mapping, per-bank activity, MBC
+  register writes with their effect, and a plain-language explanation; a
+  bank lesson stops at a real switch. User ROMs get no invented names.
 - Guided lesson "Follow one press of Right": joypad → `player_x` store → OAM X
   store (outline ahead of the unchanged picture) → next frame with changed
   pixels → the tile's bit planes. Every stop is a real emulator event.
@@ -32,9 +38,9 @@ Working title. Living guide for people and AI contributors. Read alongside `AGEN
   Windows CI, launched from a clean folder. A physical Windows desktop,
   installers, signing, and macOS remain unverified.
 
-Next: an interrupt and timer lesson built from real IF/IE storage and execution
-events, and a background-map view linking map entries to tiles. Add verified
-DMA hooks before supporting DMA-based lessons. Do not present end-of-frame
+Next: an observed OAM DMA record for real games' sprites, an interrupt and
+timer lesson built from real IF/IE storage and execution events, and a
+background-map view linking map entries to tiles. Do not present end-of-frame
 reconstruction as pixel provenance.
 
 ## Purpose

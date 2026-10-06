@@ -13,7 +13,7 @@ namespace {
 using style::q;
 using Block = SystemDiagram::Block;
 using Path = SystemDiagram::Path;
-const char* titles[] = {"Joypad", "Cartridge ROM", "CPU · SM83", "WRAM $C000", "VRAM $8000", "OAM $FE00", "PPU", "LCD"};
+const char* titles[] = {"Joypad", "Cartridge", "CPU · SM83", "WRAM $C000", "VRAM $8000", "OAM $FE00", "PPU", "LCD"};
 QString held(std::uint8_t mask) {
     static const char* names[] = {"Right", "Left", "Up", "Down", "A", "B", "Select", "Start"};
     QStringList out;
@@ -29,7 +29,10 @@ SystemDiagram::SystemDiagram(QWidget* parent) : QWidget(parent) {
 }
 void SystemDiagram::setSnapshot(const Snapshot& s) {
     detail_[Block::Joypad] = "JOYP $FF00\n" + held(s.heldButtons);
-    detail_[Block::Cartridge] = "$0000–$7FFF\n32 KiB, ROM only";
+    const auto& c = s.cartridge;
+    detail_[Block::Cartridge] = c.info.banked()
+        ? QString("%1 · %2 banks\nbank %3 at $4000").arg(q(mbcName(c.info.mbc))).arg(c.info.romBanks()).arg(c.banks.rom)
+        : QString("no MBC · 32 KiB\nfixed banks 0 and 1");
     detail_[Block::Cpu] = QString("PC %1 · A %2\n%3").arg(q(hex(s.registers.pc)), q(hex(s.registers.af >> 8, 2)),
         s.lastExecuted ? q(disassemble(*s.lastExecuted)) : QString("no opcode yet"));
     detail_[Block::Wram] = s.teaching ? QString("player_x = %1").arg(s.playerX) : QString("8 KiB work RAM");

@@ -17,6 +17,7 @@ class QTableWidget;
 
 namespace observatory {
 class ActivityPanel;
+class CartridgePanel;
 class GameView;
 class SystemDiagram;
 class TileInspector;
@@ -33,9 +34,17 @@ public:
     void frameStep();
     // Break on write: run until the CPU attempts a write to `address` (or a limit).
     WatchResult runUntilWritten(std::uint16_t address);
+    // Run until the cartridge maps a different bank (up to one emulated second).
+    WatchResult runUntilBankChange();
     void refresh();
+    // Any Game Boy cartridge image; battery RAM is read from and saved to
+    // <same folder>/<same name>.sav.
     void loadFile(const QString& path);
     void loadTeaching();
+    void loadBankDemo();
+    // Writes battery-backed cartridge RAM now; false when there is none or it failed.
+    bool saveBattery();
+    QString batteryPath() const { return savePath_; }
     void setMemoryBase(std::uint16_t base);
     void selectAddress(std::uint16_t address);
     std::uint16_t selectedAddress() const { return selectedAddress_; }
@@ -48,6 +57,9 @@ public:
 protected:
     bool eventFilter(QObject* object, QEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 private:
     void buildActions();
     void buildCentral();
@@ -56,7 +68,12 @@ private:
     void tick();
     void restart();
     void warmTeaching();
+    void warmBankDemo();
+    void loadBytes(const QByteArray& bytes, const QString& name, const QString& savePath);
+    bool loadBatteryFile();
     void afterLoad();
+    LessonStep idleLessonStep() const;
+    QString romLabel(std::uint16_t address) const;
     void updateWriter();
     void updateSelection();
     void updatePanels(bool force);
@@ -77,15 +94,19 @@ private:
     std::uint64_t runStartTick_{};
     QAction *runAction_{}, *stepAction_{}, *frameAction_{}, *untilAction_{}, *traceAction_{};
     QAction *spritesAction_{}, *changesAction_{};
+    QAction* saveBatteryAction_{};
     QMenu* viewMenu_{};
+    QString romName_, savePath_;
+    QElapsedTimer batteryTimer_;
     GameView* game_{};
     SystemDiagram* diagram_{};
     TileInspector* tiles_{};
     ActivityPanel* map_{};
-    QDockWidget *systemDock_{}, *cpuDock_{}, *memoryDock_{}, *tilesDock_{}, *mapDock_{}, *writesDock_{}, *lessonDock_{};
-    QLabel *badge_{}, *cursor_{}, *frameLabel_{}, *instruction_{}, *flags_{}, *writer_{}, *selection_{};
+    CartridgePanel* cartridge_{};
+    QDockWidget *systemDock_{}, *cpuDock_{}, *memoryDock_{}, *cartridgeDock_{}, *tilesDock_{}, *mapDock_{}, *writesDock_{}, *lessonDock_{};
+    QLabel *badge_{}, *cursor_{}, *frameLabel_{}, *instruction_{}, *flags_{}, *writer_{}, *selection_{}, *window_{};
     QLabel *activityLabel_{}, *traceStatus_{}, *lessonProgress_{}, *lessonHeading_{}, *lessonBody_{};
-    QPushButton *lessonAction_{}, *lessonStop_{};
+    QPushButton *lessonAction_{}, *lessonStop_{}, *lessonFollow_{};
     QTableWidget *registers_{}, *memory_{}, *writes_{};
     QComboBox* region_{};
     QLineEdit* address_{};

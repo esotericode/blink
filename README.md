@@ -3,14 +3,16 @@
 A native desktop Game Boy teaching lab. Run an original tiny game, press Right,
 and follow the change from the joypad register through a CPU instruction to
 `player_x`, sprite memory, the next displayed frame, and the tile bits that
-make the picture. C++20 / Qt 6 Widgets / SameBoy; Linux and Windows.
+make the picture. Then open any Game Boy ROM you own and watch the same
+panels, including which cartridge banks the CPU can see and every bank
+switch. C++20 / Qt 6 Widgets / SameBoy; Linux and Windows.
 
 ![Console Observatory paused at lesson step 3: the CPU has written sprite 0's X into OAM; the outline shows the new position while the picture is still the previous frame](docs/console-observatory.png)
 
 The application starts paused with its bundled game already visible. Normal
 use works offline in one executable with ordinary Qt runtime libraries. No
-browser, local server, account, backend, commercial game, or proprietary boot
-ROM is required.
+browser, local server, account, backend, or proprietary boot ROM is required,
+and no commercial game is included.
 
 ## What you can do
 
@@ -29,6 +31,29 @@ ROM is required.
   attempts and opcode starts over a labelled interval, with a page magnifier.
 - **Step** one instruction (F10) or to the next completed frame (F11), with
   registers, flags, disassembly, memory, and captured writers in step.
+- **Open any Game Boy ROM** (File › Open, Ctrl+O, or drop a `.gb`/`.gbc`
+  file on the window), up to 8 MiB, with any controller SameBoy emulates
+  (none, MBC1, MBC2, MBC3 with clock, MBC5, MBC7, MMM01, HuC1, HuC3, camera,
+  TPP1). It starts paused at power-on; F5 runs it.
+- **Cartridge · banks** panel: the CPU's three cartridge windows
+  (`$0000–$3FFF`, `$4000–$7FFF`, `$A000–$BFFF`) on the left, every ROM and
+  RAM bank of the cartridge on the right, and lines showing which bank each
+  window shows right now. Banks are shaded by how many opcodes ran from them.
+  A plain-language explanation adapts to the cartridge's controller, and a
+  list shows each controller write (`$2000 ← $02  MBC1 ROM bank select`)
+  with its effect (`ROM bank 1 → 2`). **Run until the bank changes** stops
+  right after the next switch. Memory and CPU panels name the mapped bank and
+  the file offset, so the same address showing different code is explained.
+![The bank-switching demo paused right after the MBC1 bank switch: the Cartridge panel links the CPU's $4000 window to ROM bank 2, lists the controller write $2000 ← $02 with its effect "ROM bank 1 → 2", and the lesson explains it](docs/cartridge-banks.png)
+
+- **Bank-switching demo** (File › Bundled examples): an original MBC1
+  cartridge whose banks 1–3 each keep a different routine at `$4000`. The
+  Lesson panel presses A and stops at the real bank switch.
+- **Battery saves**: battery-backed cartridge RAM is read from and written to
+  a `.sav` file next to the ROM (same name), automatically every few seconds
+  while it changes, when you open another game, and on exit (File › Save
+  battery RAM now: Ctrl+S). The format is SameBoy's: raw RAM, plus a clock
+  footer for MBC3/HuC3/TPP1 clocks.
 
 Panels dock, tab, float, and close; **View › Reset layout** restores them.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy
@@ -41,7 +66,8 @@ polled buttons and `$C003` counts game updates modulo 256. Sprite 0's X/Y bytes
 are at `$FE01`/`$FE00`: OAM X is `player_x + 8`, OAM Y is `player_y + 16`.
 These names are source annotations, enabled only when ROM bytes exactly match
 the bundled demo. The program polls once per VBlank and clamps movement to the
-160×144 display. This is a teaching game, not a commercial title.
+160×144 display. This is a teaching game, not a commercial title. Other ROMs
+get no variable names: names come only from a bundled program's own source.
 
 ## Build and run — Ubuntu 24.04 x86-64
 
@@ -113,7 +139,7 @@ cmake --install build --prefix out\install
 cpack --config build\CPackConfig.cmake -B out
 ```
 
-This writes `out\console-observatory-0.2.0-windows-x64.zip` (about 12 MB). Installing runs
+This writes `out\console-observatory-0.3.0-windows-x64.zip` (about 12 MB). Installing runs
 `windeployqt` (through Qt's CMake deployment support), which copies the Qt
 DLLs, platform and style plugins, the MinGW runtime, and a `qt.conf` beside
 `console-observatory.exe`. Unzip anywhere and run the `.exe`; the target
@@ -133,16 +159,26 @@ python3 tools/assemble_rom.py --source rom --output out/rom
 ```
 
 `rom/teaching.asm` contains all game code and original tile/sprite data.
-`rom/boot.asm` is an original 256-byte teaching boot: it disables boot mapping
-and transfers to cartridge `$0100`. It does not reproduce hardware startup or
-validate headers. No Nintendo logo is embedded. The strict, two-pass Python
-assembler supports the subset actually used, rejects unsupported syntax and
-overlaps, resolves symbols, and writes checksums. No RGBDS is required.
+`rom/bankdemo.asm` is the original MBC1 bank-switching demo (four 16 KiB ROM
+banks, 8 KiB battery-backed RAM); `BANK n` places code in ROM bank n.
+`rom/boot.asm` is an original 256-byte boot program: it clears VRAM, sets the
+sound and LCD registers and CPU registers to the documented DMG post-boot
+values (AF = `$01B0`, or `$0180` when the header checksum is 0; BC = `$0013`,
+DE = `$00D8`, HL = `$014D`, SP = `$FFFE`, LCDC = `$91`, BGP = `$FC`), disables
+boot mapping, and transfers to cartridge `$0100`. Games rely on that state. It
+does not scroll a logo or validate the header, and the timing of the handoff
+differs from hardware. No Nintendo logo is embedded. The strict, two-pass
+Python assembler supports the subset actually used, rejects unsupported
+syntax and overlaps, resolves symbols, and writes checksums. No RGBDS is
+required.
 
-Outputs: `teaching.gb`, `boot.bin`, `teaching.sym`, `manifest.json`, and the
-generated embedding header. CMake runs the same assembler and embeds both
-binaries into the executable. The reference teaching-ROM SHA-256 is
-`e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672`.
+Outputs: `teaching.gb`, `bankdemo.gb`, `boot.bin`, `.sym` files (`BB:AAAA`
+with the real bank), `manifest.json`, and the generated embedding header.
+CMake runs the same assembler and embeds all three binaries into the
+executable. Reference SHA-256: teaching ROM
+`e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672`, bank
+demo `b9c2530bff25161ac3810d893263ab54cee99ade64a0526a61bc7551e746c8c7`, boot
+`e758c75ff459e3ac8786850d551c49c2e6b5c1ef64f9d7757b9b59eb67e1895f`.
 Editing the ROM rebuilds its embedding and source-defined annotation addresses.
 The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 
@@ -152,7 +188,7 @@ The Windows icon is generated from the SVG design by `tools/make_icon.py`.
 cmake --install build --prefix "$PWD/out/install"
 ./out/install/bin/console-observatory
 cpack --config build/CPackConfig.cmake -B out
-sudo apt install ./out/console-observatory_0.2.0_amd64.deb
+sudo apt install ./out/console-observatory_0.3.0_amd64.deb
 console-observatory
 ```
 
@@ -196,25 +232,42 @@ not verified yet. Build without verification executables with
   Turning capture off/on clears stale writer evidence. The newest 64 attempts
   appear in the list; memory selection searches the whole retained window.
   Selecting historical evidence does not rewind the current state.
-- This adapter accepts 32 KiB ROM-only monochrome DMG cartridges. WRAM echo
-  addresses are canonicalized; bank switching is deliberately excluded.
-  The minimal boot is for teaching code. General commercial-game compatibility
-  is not claimed. Audio hardware is emulated but playback is not implemented.
+- Any cartridge image from 336 bytes to 8 MiB loads; the header decides the
+  controller, as in SameBoy. MBC6 and TAMA5 (not emulated by SameBoy) and
+  unknown types are refused before the current game is touched. The machine
+  is always a monochrome DMG: Game Boy Color-only games usually show their own
+  "requires Game Boy Color" screen, and Super Game Boy features are absent.
+  The panel says so for each cartridge.
+- Bank views come from SameBoy's public direct-access API, which reports the
+  bank mapped into each window; reading them never runs the CPU. A bank
+  change is detected at atomic-step boundaries and attributed to the captured
+  controller write in that step. Cartridge RAM views show the selected bank's
+  storage whether or not the program has RAM enabled (the CPU cannot read it
+  while disabled); clock registers are not shown as RAM. MMM01 rearranges ROM
+  inside the emulator, so its file offsets are approximate.
+- Commercial-game compatibility is SameBoy's; this project has verified the
+  bundled cartridges and an MBC5 variant, not a commercial library. Most games
+  copy sprites with OAM DMA, which the CPU write hook does not see, so their
+  sprite writes show no last writer. Audio is emulated but not played.
 - No read trace, DMA/PPU transfer trace, exact write-cycle timestamp, reverse
   execution, pixel provenance, gate model, or automatic complete causality.
   The system overview is a functional schematic, not a circuit diagram.
 
 ## Verification and next milestone
 
-Four CTest suites: engine behavior (nine groups), rendered native Qt widgets,
+Four CTest suites: engine behavior (eleven groups), rendered native Qt widgets,
 deterministic ROM generation, and vendored source integrity. The engine suite
 compares full SameBoy save-state bytes, registers, WRAM, VRAM, OAM, frame
 pixels, ticks, and opcode counts with tracing enabled/disabled; checks that
 run-until-write reaches the identical state as untraced stepping; verifies
 the one-pixel movement and tile decoding against source bytes and rendered
 colours; and checks inspection purity, bounded history, interrupt
-attribution, HALT, and step synchronization. The widget suite drives the
-whole lesson through its buttons and asserts the real state at every stop.
+attribution, HALT, and step synchronization. Cartridge groups check the
+post-boot state, MBC1 and MBC5 switching with the writer evidence, banked
+disassembly and per-bank counts, cartridge RAM, battery save/restore, banked
+trace parity, and pure inspection with a bank mapped. The widget suite drives
+both lessons through their buttons, opens an MBC5 ROM by drag and drop with an
+existing `.sav`, and asserts the real state at every stop.
 
 Linux: passed offscreen and under X11 (local and GitHub Actions). Windows:
 GitHub Actions builds with official Qt 6.8.3 MinGW, runs all suites, the

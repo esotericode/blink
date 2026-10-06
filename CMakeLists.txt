@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 if(POLICY CMP0177)
     cmake_policy(SET CMP0177 NEW)
 endif()
-project(ConsoleObservatory VERSION 0.2.0 LANGUAGES C CXX)
+project(ConsoleObservatory VERSION 0.3.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -68,12 +68,13 @@ endif()
 
 set(ROM_OUT ${CMAKE_CURRENT_BINARY_DIR}/generated)
 add_custom_command(OUTPUT ${ROM_OUT}/teaching_rom.hpp ${ROM_OUT}/teaching.gb
-    ${ROM_OUT}/boot.bin ${ROM_OUT}/teaching.sym ${ROM_OUT}/manifest.json
+    ${ROM_OUT}/boot.bin ${ROM_OUT}/teaching.sym ${ROM_OUT}/bankdemo.gb ${ROM_OUT}/bankdemo.sym
+    ${ROM_OUT}/manifest.json
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/assemble_rom.py
         --source ${CMAKE_CURRENT_SOURCE_DIR}/rom --output ${ROM_OUT}
-    DEPENDS tools/assemble_rom.py rom/teaching.asm rom/boot.asm VERBATIM)
+    DEPENDS tools/assemble_rom.py rom/teaching.asm rom/bankdemo.asm rom/boot.asm VERBATIM)
 add_library(observatory_engine src/emulator/engine.cpp src/emulator/disassembly.cpp
-    src/emulator/graphics.cpp src/teaching/annotations.cpp src/teaching/lesson.cpp
+    src/emulator/graphics.cpp src/emulator/cartridge.cpp src/teaching/annotations.cpp src/teaching/lesson.cpp
     ${ROM_OUT}/teaching_rom.hpp)
 target_include_directories(observatory_engine PUBLIC src ${ROM_OUT})
 target_link_libraries(observatory_engine PRIVATE sameboy)
@@ -81,7 +82,7 @@ target_compile_options(observatory_engine PRIVATE ${observatory_warnings})
 
 if(OBSERVATORY_BUILD_GUI)
     add_library(observatory_widgets src/ui/main_window.cpp src/ui/game_view.cpp
-        src/ui/tile_view.cpp src/ui/activity_map.cpp src/ui/system_diagram.cpp src/ui/style.cpp)
+        src/ui/tile_view.cpp src/ui/activity_map.cpp src/ui/system_diagram.cpp src/ui/style.cpp src/ui/cartridge_view.cpp)
     target_include_directories(observatory_widgets PUBLIC src)
     target_link_libraries(observatory_widgets PUBLIC observatory_engine Qt6::Widgets)
     target_compile_definitions(observatory_widgets PUBLIC OBSERVATORY_VERSION="${PROJECT_VERSION}")
@@ -138,7 +139,8 @@ endif()
 install(DIRECTORY licenses/ DESTINATION ${OBSERVATORY_DATA_DIR}/licenses ${observatory_license_filter})
 install(DIRECTORY rom/ DESTINATION ${OBSERVATORY_DATA_DIR}/rom)
 install(FILES tools/assemble_rom.py DESTINATION ${OBSERVATORY_DATA_DIR}/tools)
-install(FILES ${ROM_OUT}/teaching.gb ${ROM_OUT}/teaching.sym ${ROM_OUT}/manifest.json
+install(FILES ${ROM_OUT}/teaching.gb ${ROM_OUT}/teaching.sym ${ROM_OUT}/bankdemo.gb
+    ${ROM_OUT}/bankdemo.sym ${ROM_OUT}/boot.bin ${ROM_OUT}/manifest.json
     DESTINATION ${OBSERVATORY_DATA_DIR}/rom)
 if(UNIX AND NOT APPLE)
     install(FILES packaging/console-observatory.desktop DESTINATION share/applications)

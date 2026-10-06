@@ -6,10 +6,12 @@
 // "Follow one press of Right": a guided path through the bundled teaching ROM.
 // Each step is ended by a real emulator event; text is filled from that evidence.
 namespace observatory {
-enum class LessonStep { Start, Holding, Stored, Copied, Drawn, Tile, Done, NeedsTeachingRom };
+enum class LessonStep { Start, Holding, Stored, Copied, Drawn, Tile, Done, NeedsTeachingRom,
+                        BankDemo, BankSwitched }; // the last two belong to the bundled bank demo
 inline constexpr int lessonStepCount = 5;
 struct LessonEvidence {
     std::optional<WriteEvent> write;          // The write that ended the step, if any.
+    BankMapping banksBefore, banksAfter;      // Mapping across a bank-change stop.
     std::uint64_t instructions{}, frames{};   // Work done while running to it.
     int changedPixels{};                      // Between the two latest outputs.
 };

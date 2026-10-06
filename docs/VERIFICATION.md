@@ -3,6 +3,31 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Any cartridge, bank visualisation (0.3.0)
+
+### Linux (reference: Ubuntu 24.04, GCC 13.3.0, Qt 6.4.2)
+
+| Check | Evidence / result |
+| --- | --- |
+| Build | Clean Release build; no warnings from project code. |
+| CTest | **4/4** (engine, widgets offscreen, ROM reproducibility, vendor integrity). |
+| ROMs | `rom_tests.py` rebuilds all outputs byte-identically; checks both headers/checksums and the bank demo's layout (each bank starts with its own routine, distinct patterns). Teaching ROM SHA-256 unchanged; new boot `e758c75f…895f`, bank demo `b9c2530b…8c7`. |
+| Engine | **Eleven groups** pass. New: post-boot hand-over (AF `$01B0`/`$0180` by header checksum, BC/DE/HL/SP, LCDC `$91`, BGP, FF50, cleared VRAM). MBC1 demo: header decode; `$4000` window equals bank 1, then bank 2 storage; `runUntilBankChange` stops with the controller write (`$01D9 LD [$2000], A`, 1 → 2) and PC at the following `CALL`; the next opcode at `$4000` is bank 2's and is attributed to bank 2; cartridge RAM write before/after; banks 3 → 1 → 2; per-bank opcode counts sum with boot opcodes to all cartridge opcodes; **full-state purity with bank 2 mapped and RAM present**; battery bytes, restart keeps them, a fresh engine loads them. Banked **trace on/off parity** (three switches, full save state). MBC5 at 128 KiB switches; ROM size bounds rejected without touching state; header heuristics (no-MBC > 32 KiB → MBC3, unknown/MBC6 unsupported, CGB flags, clock). Existing groups unchanged; fixtures now enter the cartridge after the boot hand-over. |
+| Widgets | Both lessons through their buttons. Bank lesson: stops with bank 2 mapped and PC at `CALL $4000`; text contains the real writer and `1</b> to <b>2`; switch list row `$2000 ← $02` / `ROM bank 1 → 2`; the Memory panel's `$4000` window follows to bank 2's bytes; CPU panel shows `$4000 bank 2` after one step; MBC writer text; second press → bank 3; the panel's run button stops at its limit without a press. Battery `.sav` written (8,192 bytes, signature and count). An MBC5 ROM opened by **drag and drop** loads its existing `.sav`, starts paused at power-on, shows its facts and file offsets, switches banks on a held key via the panel button, and its `.sav` is updated when another game is opened. No register "Δ" against the previous game. Cartridge panel for the no-MBC teaching ROM; diagram click opens it. |
+| X11 | Widget suite under `xvfb-run` with screenshots of every lesson stage and tab, including `tab-cartridge-teaching`, `bank-0-start`, `bank-1-switched`, `tab-memory-banked`, and `minimum-cartridge`. |
+| Layout review | Found and fixed: Cartridge panel overlapped itself at 980×680 (now scrolls; fits at the default size); truncated controller-write column (resizing + tooltips); bank demo opening on its blank first LCD frame (warm-up waits for two visible frames); registers marked changed against the previous game after a load; screenshots taken before pending layouts ran (tests now process events first). |
+| Performance | Traced sustained run: 1.49–1.84 ms per emulated frame across three runs, versus 1.31–1.57 ms for the previous commit on the same machine (per-step bank reads and per-opcode bank attribution); about 10× faster than real time. |
+
+### Windows (local cross build)
+
+| Check | Evidence / result |
+| --- | --- |
+| Build | Ubuntu MinGW-w64 GCC 13 against Qt 6.4.2 qtbase built from source: app, `engine_tests.exe`, `widget_tests.exe`. Only the known vendored `save_state.c:1500` warning. |
+| Engine (Wine 9.0) | All eleven groups pass. |
+| Widgets (Wine 9.0, native `windows` plugin) | Passes, with all screenshots written and inspected. **Found and fixed:** the extended suite crashed with a stack overflow, because each `Snapshot` held two 92 KB frames inline (about 193 KB) and MinGW's main thread has a 2 MiB stack; the app's load path also stacked several snapshot temporaries. Frames are now heap-backed vectors (always 23,040 pixels), making a snapshot about 9 KB. |
+
+GitHub Actions results for this version are recorded after the push below.
+
 ## 2026-10-06 — Windows build, guided lesson, visual inspectors
 
 ### Linux (reference: Ubuntu 24.04, GCC 13.3.0, Qt 6.4.2, strict mode)
