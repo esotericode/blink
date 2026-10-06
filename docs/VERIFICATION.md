@@ -3,6 +3,29 @@
 These results cover this implementation and controlled teaching ROM, not all
 SameBoy-supported games or desktop platforms. Newest first.
 
+## 2026-10-06 — Review fixes (unreleased)
+
+- GCC 13.3 Qt-free engine build: existing checks plus transactional unsupported
+  ROM rejection, malformed/short battery files, native controller save formats,
+  legacy RTC footers, restart dirty-state preservation, trailing MMM01 battery
+  export, RAM-size recovery, bank-aware/mirrored writer lookup, and long-running
+  pacing arithmetic pass. ROM, vendor integrity, and glossary checks pass.
+- Native widget regression coverage added for lesson interruptions and a fresh
+  restart, sprite animation/8×16 selection/manual pinning, paused activity,
+  inspector links, bank-aware writer text, failed close/load/save, recovery to
+  another destination, rejected-file protection, and paused autosaving.
+- Native Qt and CMake are unavailable in the editing workspace. At application
+  commit `9d87e47`, [Linux CI run 23](https://github.com/esotericode/blink/actions/runs/37490523254)
+  passes all five CTest suites, native X11 interactions, install, and `.deb`
+  generation. [Windows CI run 19](https://github.com/esotericode/blink/actions/runs/37490523301)
+  passes all suites, native Windows widgets, portable packaging, and the clean
+  packaged launch. Its default, 980×680 minimum, and lesson screenshots were
+  inspected. The original published screenshots remain illustrative.
+- Linux CI additionally builds a Qt-free Debug engine with AddressSanitizer;
+  results for that added job step will be recorded once it completes. Local
+  sanitizer runs hit this workspace's unavailable process/task metadata, so
+  they are not evidence of a clean complete sanitizer suite.
+
 ## 2026-10-06 — First GitHub releases
 
 The Release workflow (`.github/workflows/release.yml`, run 1–3 by manual

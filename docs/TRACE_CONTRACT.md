@@ -6,6 +6,8 @@
 and rejects other-thread access. Qt's main thread is also the emulator owner.
 Live execution runs in 3 ms quanta, checked every 32 atomic core calls, using
 wall time only for pacing. At most two frame periods of wall-time debt are kept.
+Nanoseconds are converted using whole seconds plus the remainder, avoiding
+intermediate multiplication overflow during uninterrupted runs.
 The core's timekeeping is disabled; no GUI event is emitted per instruction.
 Immutable-by-convention `Snapshot` values are copied at publication boundaries
 (roughly 30 Hz live, immediately on pause/step). There are no backend services.

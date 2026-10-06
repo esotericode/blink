@@ -62,7 +62,10 @@ The Windows build is not code-signed, so SmartScreen may ask first
   a `.sav` file next to the ROM (same name), automatically every few seconds
   while it changes, when you open another game, and on exit (File › Save
   battery RAM now: Ctrl+S). The format is SameBoy's: raw RAM, plus a clock
-  footer for MBC3/HuC3/TPP1 clocks.
+  footer for MBC3/HuC3/TPP1 clocks. Autosaving also works while paused. Failed
+  saving keeps the current game open; the Cartridge panel shows the destination
+  and error, with Retry and **Save battery RAM as** to recover elsewhere.
+  Unreadable or malformed existing saves are protected from automatic overwrite.
 - **OAM DMA as a writer**: most commercial games build their sprite table in
   work RAM and copy it into OAM with the hardware's DMA (writing a page number
   to `$FF46`). The app records each request with the instruction that made it
@@ -80,6 +83,12 @@ The Windows build is not code-signed, so SmartScreen may ask first
   translucent shadow.
 
 Panels dock, tab, float, and close; **View › Reset layout** restores them.
+Tile-row and memory-map links reveal the selected byte in Memory. Sprite
+selection follows tile changes as the game animates; choosing a tile manually
+pins that tile. Browsing while paused preserves the last activity interval.
+Manual execution, input, or capture changes leave the guided lesson for free
+exploration; starting again establishes a fresh frame. The lesson pairs real
+instructions and values with prediction and explanation prompts.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy
 A/B/Select/Start; this game only uses directions. Game keys work while tables
 have focus, text fields keep their keys, and Enter still activates a focused
@@ -299,7 +308,7 @@ not verified yet. Build without verification executables with
 
 ## Verification and next milestone
 
-Five CTest suites: engine behavior (twelve groups), rendered native Qt widgets,
+Five CTest suites: engine behavior (including save/bank/pacing regressions), rendered native Qt widgets,
 deterministic ROM generation, vendored source integrity, and a check that every
 tooltip the interface uses exists in the glossary and stays short. The engine suite
 compares full SameBoy save-state bytes, registers, WRAM, VRAM, OAM, frame
