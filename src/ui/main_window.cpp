@@ -609,13 +609,13 @@ WatchResult MainWindow::runUntilWritten(std::uint16_t address) {
         statusBar()->showMessage("Turn on Capture writes to stop on a write.", 6000);
     } else if (result.stop == WatchResult::Stop::Dma) {
         const auto& d = *result.dma;
-        statusBar()->showMessage(QString("Stopped after an OAM DMA copy of %1–%2 filled OAM, including %3 (requested by %4; %5 instructions, %6 frames later).")
+        statusBar()->showMessage(QString("Stopped after checking the OAM DMA request for %1–%2, including %3 (requested by %4; %5 instructions, %6 frames later; %7 of 160 bytes matched).")
             .arg(q(hex(d.sourceOf(0))), q(hex(d.sourceOf(oamBytes - 1))), where,
                  d.instruction ? q(hex(d.instruction->pc)) + " " + q(disassemble(*d.instruction)) : QString("an unrecorded instruction"))
-            .arg(result.instructions).arg(result.frames), 10000);
+            .arg(result.instructions).arg(result.frames).arg(d.matching), 10000);
     } else if (result.stop == WatchResult::Stop::Write) {
         const auto& w = *result.write;
-        statusBar()->showMessage(QString("Stopped after the write to %1 by %2 (%3 instructions, %4 frames later).")
+        statusBar()->showMessage(QString("Stopped after the CPU write attempt to %1 by %2 (%3 instructions, %4 frames later).")
             .arg(where, w.instruction ? q(hex(w.instruction->pc)) + " " + q(disassemble(*w.instruction)) : QString("interrupt/wait work"))
             .arg(result.instructions).arg(result.frames), 10000);
     } else {
@@ -1113,8 +1113,8 @@ void MainWindow::updateWriter() {
             if (writerMatches(*i, selectedAddress_, snapshot_.cartridge)) { found = &*i; break; }
         }
     }
-    // OAM is also written by DMA, which the CPU write hook cannot see. The newer
-    // of the last CPU store and the last observed copy is the last writer.
+    // Retained CPU attempts and DMA requests provide candidate evidence. A
+    // later OAM/source comparison does not establish per-byte provenance.
     const auto a = canonicalAddress(selectedAddress_);
     if (!selectedEvent_ && a >= 0xFE00 && a < 0xFE00 + oamBytes) {
         const auto i = std::size_t(a - 0xFE00);

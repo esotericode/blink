@@ -21,10 +21,12 @@ SameBoy-supported games or desktop platforms. Newest first.
   passes all suites, native Windows widgets, portable packaging, and the clean
   packaged launch. Its default, 980×680 minimum, and lesson screenshots were
   inspected. The original published screenshots remain illustrative.
-- Linux CI additionally builds a Qt-free Debug engine with AddressSanitizer;
-  results for that added job step will be recorded once it completes. Local
-  sanitizer runs hit this workspace's unavailable process/task metadata, so
-  they are not evidence of a clean complete sanitizer suite.
+- At `4ecc79f`, [Linux CI run 25](https://github.com/esotericode/blink/actions/runs/37491583721)
+  also passes the full Qt-free Debug engine suite with AddressSanitizer, plus
+  ROM/vendor/glossary checks. [Windows CI run 21](https://github.com/esotericode/blink/actions/runs/37491583765)
+  again passes all native checks and the clean packaged launch. Local sanitizer
+  runs hit this workspace's unavailable process/task metadata; the sanitizer
+  evidence is the complete CI run, not those constrained local attempts.
 
 ## 2026-10-06 — First GitHub releases
 

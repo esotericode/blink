@@ -82,6 +82,9 @@ Final records enter a fixed-capacity deque; eviction count and oldest retained
 tick are published. Capture toggling clears history to prevent stale last-writer
 claims after an unobserved interval. Inspection never contributes to activity
 counters. Snapshots contain copies, not pointers into mutable core arrays.
+At equal ticks and unchanged capture mode, the UI retains the last published
+activity interval while navigating memory; the engine's counters still reset
+on each publication. The displayed interval keeps its original start/end times.
 
 The completed image is copied at each output callback and labeled with output
 kind/frame number/enclosing boundary. It is not a reconstruction from current
@@ -123,9 +126,22 @@ right bank and labelled with it.
 
 Battery-backed RAM (and clock state) uses SameBoy's `GB_save_battery_to_buffer`
 / `GB_load_battery_from_buffer` / `GB_get_battery_dirty`. Restart reloads the
-same cartridge and restores battery RAM, like a power cycle. The UI writes the
+same cartridge and restores battery RAM, like a power cycle, retaining any
+unsaved status. Complete RAM and recognized clock footers are validated before
+loading; malformed input changes neither the machine nor its dirty flag.
+Short legacy RTC buffers receive full-union backing storage while retaining
+their logical length, guarding the pinned loader's footer copy without vendor
+changes. Export capability comes from the core's public save-size API.
+The UI writes the
 buffer to `<rom folder>/<rom name>.sav`; that is file I/O outside emulation and
 does not change the emulated state.
+An independent timer saves while paused. Saving failure retains the current
+game on close/load; rejected existing files are protected until an explicit
+destination is chosen. The Cartridge panel displays persistent state/errors.
+Writer lookup for cartridge RAM resolves `(bank × $2000 + offset) % RAM size`,
+including small-RAM mirrors. Historical selections retain their recorded bank
+beside the current mapping. Header and effective controller types are distinct
+when the pinned core's padded-ROM, multicart, or RAM-recovery heuristics apply.
 
 ## OAM DMA
 
