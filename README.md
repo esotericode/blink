@@ -66,7 +66,9 @@ and no commercial game is included.
   byte (its region, and for hardware registers what that register does),
   each part and arrow of the system overview, banks, tiles down to a single
   bit or pixel, panels (hover a tab or title bar), and every button. Written
-  for a curious newcomer: what it is, why it matters, how to use it.
+  for a curious newcomer: what it is, why it matters, how to use it. On a
+  compositing desktop, `OBSERVATORY_TOOLTIPS=soft` gives the cards a
+  translucent shadow.
 
 Panels dock, tab, float, and close; **View › Reset layout** restores them.
 Arrows move the star. Z/X, Backspace, and Enter map to Game Boy

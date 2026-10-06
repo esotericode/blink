@@ -37,19 +37,18 @@ QString rich(const QString& text) {
 }
 
 // The card: title in the accent colour, the explanation, and an optional hint
-// in a footer band. Rounded with a soft shadow where the window system
-// composites translucent windows; elsewhere opaque, rounded by a mask.
+// in a footer band. Opaque and rounded by a mask; optionally translucent with
+// a soft shadow (see the constructor).
 class Card : public QWidget {
 public:
     Card() : QWidget(nullptr, Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus |
                               Qt::WindowTransparentForInput | Qt::NoDropShadowWindowHint) {
         setObjectName("observatoryTip");
         setAttribute(Qt::WA_ShowWithoutActivating);
-        // Soft (translucent, shadowed) where the window system always composites;
-        // OBSERVATORY_TOOLTIPS=flat or =soft overrides the choice.
-        const auto platform = QGuiApplication::platformName();
-        const auto choice = qEnvironmentVariable("OBSERVATORY_TOOLTIPS");
-        translucent_ = choice == "soft" || (choice != "flat" && (platform == "windows" || platform.startsWith("wayland") || platform == "cocoa"));
+        // Opaque with a rounded mask by default: verified on X11 and Windows (Wine),
+        // where a translucent card stayed invisible. OBSERVATORY_TOOLTIPS=soft opts
+        // into a translucent card with a shadow on composited desktops.
+        translucent_ = qEnvironmentVariable("OBSERVATORY_TOOLTIPS") == "soft";
         if (translucent_) setAttribute(Qt::WA_TranslucentBackground);
         fade_ = new QPropertyAnimation(this, "windowOpacity", this);
         fade_->setDuration(120);

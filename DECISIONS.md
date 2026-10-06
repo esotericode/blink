@@ -212,9 +212,12 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   answer for the region under the pointer (a diagram part or arrow, a bank, a
   tile, one bit or pixel of a tile row, a memory-map cell). After one tip, moving
   to something else explains it immediately, as Qt's own tooltips do.
-- The card is translucent with a soft shadow on Windows, Wayland and macOS,
-  which always composite; on X11 (which may not) it is opaque with a rounded
-  mask. `OBSERVATORY_TOOLTIPS=flat|soft` overrides the choice.
+- The card is opaque, rounded by a window mask, on every platform. A
+  translucent variant with a soft shadow showed black margins on X11 without
+  a compositor and did not appear at all under Wine, and it could not be
+  checked on a real Windows desktop, so it is opt-in only
+  (`OBSERVATORY_TOOLTIPS=soft`). A tooltip that never appears would be worse
+  than one without a shadow.
 - Text lives in a Qt-free glossary (`src/teaching/glossary.*`), so wording is
   reviewed in one place and kept consistent; a CTest suite rejects unknown keys
   and over-long entries. Facts follow Pan Docs; writing aimed at a smart
