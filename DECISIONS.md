@@ -62,3 +62,60 @@ Primary evidence: pinned `Core/gb.c`, `Core/sm83_cpu.c`, `Core/memory.c`,
   evidence. See `docs/VERIFICATION.md`. Independent Actions run 2 subsequently
   passed on a regular Ubuntu runner, confirming the ordinary dependency,
   native X11, build/test, and package-generation commands.
+
+## 2026-10-06 — Windows as a second platform
+
+- Toolchain: **MinGW-w64 GCC**, from Qt's own installer kit. SameBoy's core
+  needs GNU C (case ranges, statement expressions, attributes); MSVC `cl.exe`
+  cannot compile it, so CMake stops with an explanation instead of failing
+  deep in the core. clang-cl is not tested. MSYS2's Qt was not chosen because
+  windeployqt does not collect the other MSYS2 DLLs that build depends on.
+- Evidence the core is sound on Windows' LLP64/MS-bitfield ABI: a MinGW cross
+  build passed the engine suite under Wine (full save-state parity, stepping,
+  movement, purity). The one compiler warning (`fseek(f, -sizeof(magic), ...)`)
+  truncates to the intended -4 and is in an unused file-based API.
+- Packaging: a portable ZIP whose root holds the `.exe`, Qt DLLs, plugins,
+  MinGW runtime, and `qt.conf` (`CMAKE_INSTALL_BINDIR="."`), produced by
+  `qt_generate_deploy_app_script` (6.4 and 6.5+ signatures). A relative
+  `--prefix` is resolved before Qt 6.5+'s deployment, which requires an
+  absolute path (found by Windows CI). No installer or signing yet.
+- CI uses official Qt 6.8.3 MinGW + MinGW 13.1 binaries; local verification
+  used Qt 6.4.2 qtbase cross-built from source because this environment's
+  network policy blocks download.qt.io. Both the oldest supported and a
+  current LTS Qt are therefore exercised.
+- Findings from the first Windows runs, all fixed: Qt ≥ 6.5 `findChild<T>()`
+  requires `Q_OBJECT` in T (affects every newer Qt, not only Windows); Git for
+  Windows' autocrlf changed vendored bytes (now pinned LF by `.gitattributes`);
+  relative deploy prefixes. Windows-specific polish: GUI subsystem, icon and
+  version resources, Consolas for code, no forced Linux font, and game
+  scaling by whole device pixels for fractional DPI.
+
+## 2026-10-06 — Visual lessons on the same evidence model
+
+- The next milestone (pause on the `player_x` store, follow the OAM store, see
+  the frame, inspect the tile) is a guided lesson. Each stop is a real event:
+  `Engine::runUntilWrite` stops at the end of the atomic step containing the
+  write attempt. A test proves it reaches byte-identical full state to
+  untraced instruction stepping, so the lesson does not perturb emulation.
+- Lesson text lives in `src/teaching/lesson.*` (no Qt) and is filled from the
+  stopping event and measurements. A widget test asserts the claims it makes,
+  e.g. that the picture is unchanged until the frame step and the reported
+  changed-pixel count. Lesson-enabled overlays reset on stop/load/restart:
+  comparing across a reset marked the whole screen as changed.
+- Snapshots now copy VRAM (8 KiB), OAM, and video registers through public
+  direct access; the all-address-space purity test still passes. The previous
+  completed output is retained by the vblank callback, so change marks compare
+  two real outputs rather than a reconstruction.
+- Tile colours come from SameBoy's own DMG palette mapping (shade n →
+  `colors[3-n]`); a test checks every rendered pixel is one of those colours.
+- The memory map counts per-address CPU write attempts (capture on) and opcode
+  starts since its last clear, labelled with its tick interval. It is not a
+  read or bus trace. Single busy bytes get a minimum 3 px marker so a one-byte
+  variable is visible at one screen pixel per address.
+- Layout: dockable panels (QDockWidget) replace fixed splitters because seven
+  panels no longer fit side by side; the default layout is rebuilt in code
+  and recoverable. Sizes were chosen from rendered screenshots: the game keeps
+  3× at 1280×930 and 2× at the new 980×680 minimum, which fits 1366×768
+  laptops. Layout is not persisted between sessions yet.
+- Enter on a focused button now activates it instead of becoming Game Boy
+  Start; elsewhere Enter remains Start.

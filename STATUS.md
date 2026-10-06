@@ -1,57 +1,68 @@
-# Status — 2026-10-05
+# Status — 2026-10-06
 
-First working native desktop slice implemented and locally verified on Ubuntu
-24.04 x86-64. C++20 / Qt 6.4.2 Widgets / CMake 3.28.3 / unchanged SameBoy 1.0.3
-DMG-B, commit `208ba4afabffab9edde416f2dbb8ae459e34adb8`.
+Native desktop teaching lab for Linux x86-64 and Windows x64. C++20 / Qt 6
+Widgets / CMake / unchanged SameBoy 1.0.3 DMG-B, commit
+`208ba4afabffab9edde416f2dbb8ae459e34adb8`. Version 0.2.0.
 
 ## Works
 
 - Offline launch with the embedded original teaching game visible. Arrow input
-  changes named WRAM position variables, OAM X/Y, and the star's real frame output.
-- Native run/pause, one-opcode step, next-output frame step; resizable game,
-  register, memory, and write inspectors; recoverable layout and focus handling.
-- Shared instruction-boundary CPU/raw-storage snapshots, storage disassembly,
-  change highlighting, source-gated semantic names, bounded last-writer evidence,
-  and selection linking between memory and captured writes.
-- Separate frame timestamps, labeled live interval summaries, write-attempt
-  labeling, unknown IRQ attribution, and visible history evictions.
-- Reproducible assembly/symbols/checksums/embedding without RGBDS; reference
-  dependencies, license notices, Linux install/desktop launcher/`.deb`, and CI.
+  changes named WRAM position variables, OAM X/Y, and the star's real output.
+- **Guided lesson** "Follow one press of Right": hold Right → stop after the
+  `player_x` store → stop after the OAM X store (outline ahead of the
+  unchanged picture) → next frame with changed pixels marked → the tile's bit
+  planes. Every stop is a real emulator event; text uses the real evidence.
+- **Run until written** (F9) for any byte, stopping at the writing step's end.
+- **Sprites and tiles**: OAM records, 128-tile VRAM blocks, and bit-plane rows
+  that combine into colour numbers and palette shades, from copied storage.
+- **Memory map**: per-address CPU write attempts and opcode starts over a
+  labelled interval for all 64 KiB, with a page magnifier and click-through.
+- **System overview**: functional schematic with live values, write counts,
+  lesson path highlighting, and click-through to storage.
+- Run/pause, one-opcode step, next-output frame step; dockable panels with a
+  recoverable default layout; menu bar, About, licenses, About Qt.
+- Shared instruction-boundary snapshots (CPU, memory, VRAM, OAM, video
+  registers), storage disassembly, change highlighting, source-gated names,
+  bounded last-writer evidence, linked selection across panels.
+- Reproducible ROM/symbols/embedding without RGBDS; Linux `.deb` and Windows
+  portable ZIP (windeployqt) packaging; Linux and Windows CI.
 
 ## Verified
 
-Four CTest suites pass (about 1.2 seconds here): full serialized-state trace
-parity over 90 controlled frames; real one-pixel Right movement through WRAM
-and OAM; all-address-space inspection purity; pause/step synchronization;
-300-frame bounded capture; IRQ/HALT semantics; ownership; native Qt controls,
-focus, writer selection and responsive timers; ROM reproducibility; 51 unchanged
-upstream file hashes. Qt tests ran offscreen and under virtual X11.
+Linux (Ubuntu 24.04, Qt 6.4.2): four CTest suites pass, including nine engine
+groups (trace parity with VRAM/OAM/previous output, stepping, purity, IRQ/HALT,
+bounded capture, tile decoding against source bytes and rendered colours,
+run-until-write, its parity with untraced stepping, activity map) and the
+widget suite, which drives the whole lesson through its buttons. Widgets also
+pass under X11 at 1600×1000 and on a 640×480 screen (window clamps to its
+980×680 minimum). Rendered layouts inspected at default and minimum sizes and
+at every lesson stage. Install tree and `.deb` generated.
 
-The installed production executable launched/rendered its embedded game from
-an unrelated directory. Default/minimum-size screenshots were inspected.
-Install output has no build RUNPATH; `.deb` control/data were inspected.
-Exact evidence and commands: `docs/VERIFICATION.md`.
-
-Independent GitHub Actions run 2 passed the Linux build, all four suites,
-ordinary `xvfb-run` native interactions, and install/package generation for
-implementation commit `a05d42798cc4c4f6cc00ffdfe314d66b85c24ea3`.
+Windows: cross-compiled locally with Ubuntu MinGW-w64 GCC 13 against Qt 6.4.2
+qtbase built from source; engine and widget suites pass under Wine 9.0 with
+Qt's native `windows` platform plugin, and the flat packaged layout launches
+from a clean folder. GitHub Actions (`windows-2025`, official Qt 6.8.3 MinGW
++ MinGW 13.1) builds, passes all four suites and the native-platform widget
+run, packages a 12 MB portable ZIP with windeployqt, and launches the unzipped
+app with only System32 on `PATH`.
 
 ## Limits
 
 32 KiB ROM-only DMG; teaching boot rather than hardware startup; raw IO storage
-rather than bus readback; operand-storage observations; CPU write attempts only,
-without DMA/PPU access hooks; completed-frame display rather than pixel provenance;
-no replay/rewind, audio playback, gate model, or automatic full causality. No
-external emulator test-ROM suite, physical compositor, clean-machine package
-installation, other Qt version, macOS, or Windows validation has been run.
+rather than bus readback; operand-storage observations; CPU write attempts
+and opcode starts only, without read, DMA, or PPU access hooks; completed-frame
+display rather than pixel provenance; no replay/rewind, audio playback, gate
+model, or automatic full causality. Not yet tested: a physical Windows desktop
+or real high-DPI monitors, Windows installer/signing, macOS, external
+emulator test-ROM suites, clean-machine `.deb` installation.
 
 ## Next concrete milestone
 
-Add a bounded pause-on-write movement lesson: stop at the `player_x` store,
-follow the OAM X store, advance to its visible frame, and provide a real-storage
-sprite/tile bitplane inspector. Keep stages tagged by actual cursors/output
-boundaries. Add verified DMA tracing before lessons for DMA-based games.
+An interrupt and timer lesson: show VBlank/STAT/timer requests and service on a
+timeline built from real IF/IE storage and execution events (label what is not
+observed), and a background-map view linking each map entry to its tile. Add
+verified DMA tracing before lessons for DMA-based games. Validate the Windows
+ZIP on a physical Windows 10/11 machine and record the result.
 
 Read `PROJECT_GUIDE.md`, `DECISIONS.md`, `AGENTS.md`, and
-`docs/TRACE_CONTRACT.md` before changing observation behavior. The first-slice
-plan is complete; future features should preserve its checks.
+`docs/TRACE_CONTRACT.md` before changing observation behavior.

@@ -45,10 +45,34 @@ instructions are available in this repository. A future bundled runtime must
 include matching Qt source/patches and all applicable third-party notices; do
 not treat this source build as a completed all-platform redistribution audit.
 
+## Windows portable package
+
+The Windows ZIP bundles, beside `console-observatory.exe`, unmodified official
+Qt 6.8.3 MinGW binaries copied by `windeployqt`: `Qt6Core`, `Qt6Gui`,
+`Qt6Widgets`, the `qwindows` platform plugin, and the `qmodernwindowsstyle`
+style plugin, plus a `qt.conf`. They are dynamically linked and can be replaced
+with compatible builds (LGPLv3). Qt's own sources for that version are at
+https://download.qt.io/archive/qt/6.8/6.8.3/ and its third-party attributions
+(for example zlib, PCRE2, HarfBuzz, FreeType, libpng, double-conversion, md4c)
+at https://doc.qt.io/qt-6.8/licenses-used-in-qt.html.
+
+It also bundles the MinGW-w64 GCC 13.1 runtime: `libstdc++-6.dll` and
+`libgcc_s_seh-1.dll` (GPLv3 with the GCC Runtime Library Exception, which
+permits this distribution) and `libwinpthread-1.dll` (mingw-w64 winpthreads,
+MIT-style). The Ubuntu Qt copyright file is excluded from this package because
+it describes OS packages the ZIP does not use.
+
+The package is built and launched in CI, but a complete redistribution audit
+of every notice that Qt's bundled third-party code requires is still open:
+before publishing a release, copy Qt's attribution files for the exact
+version into `licenses/` and review them.
+
 ## Build-only tools
 
 CMake 3.22+ (tested 3.28.3; BSD-3-Clause), Python 3.8+ (tested 3.12.3; PSF),
-GCC 13.3 (GPL with runtime exceptions), Ninja 1.11.1 (Apache-2.0), and Qt Test.
+GCC 13.3 or MinGW-w64 GCC 13 (GPL with runtime exceptions), Ninja 1.11.1
+(Apache-2.0), and Qt Test. `tools/make_icon.py` (original, MIT, standard
+library only) generates the Windows icon from the SVG design.
 These tools are not required to run the installed application. The subset
 assembler is original Python and uses only the standard library. RGBDS and
 upstream `cppp` are not required. Tool versions and verification are documented

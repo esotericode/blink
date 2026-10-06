@@ -2,9 +2,10 @@
 
 Read `PROJECT_GUIDE.md` before changing the project. If present, read `README.md`, `STATUS.md`, and `DECISIONS.md` to understand the actual implementation. Existing source and verification results determine what works; this starter guide does not establish that any code exists.
 
-The first Linux slice now exists. Also read `docs/TRACE_CONTRACT.md` and
-`docs/VERIFICATION.md`. `DEPENDENCIES.lock.json` and SameBoy's `SHA256SUMS`
-identify the reference inputs. Keep those files synchronized with changes.
+A Linux and Windows build with a guided lesson exists. Also read
+`docs/TRACE_CONTRACT.md` and `docs/VERIFICATION.md`. `DEPENDENCIES.lock.json`
+and SameBoy's `SHA256SUMS` identify the reference inputs. Keep those files
+synchronized with changes.
 
 ## Preserve the purpose
 
@@ -37,13 +38,24 @@ Build a standalone native desktop application that connects a running game's beh
   Editing assembly regenerates binary/header/symbols via the same Python tool.
 - Run the four CTest suites after emulator/observation changes. Run
   `xvfb-run -a ./build/widget_tests` for native X11 UI changes; offscreen tests
-  alone do not establish compositor behavior. Inspect rendered layouts.
+  alone do not establish compositor behavior. Inspect rendered layouts:
+  `widget_tests desktop.png minimum.png <dir>` also saves every lesson stage
+  and tab. Check the 980×680 minimum, not only the default size.
+- Windows uses MinGW-w64 (Qt's kit); never require MSVC for the core. Keep
+  `.gitattributes` (LF) or vendored hashes break on Windows checkouts. Every
+  custom widget looked up with `findChild<T>()` needs `Q_OBJECT` (Qt ≥ 6.5).
+  Windows CI must stay green, including the packaged launch with only
+  System32 on PATH. Use `--screenshot` for headless launch checks.
+- Lesson steps must end on real engine events (`runUntilWrite`, frame step),
+  and lesson text in `src/teaching/lesson.*` may only claim what the widget
+  test asserts. Keep run-until-write's parity test with untraced stepping.
 - Vendor files are byte-for-byte upstream. Integration changes belong outside
   `third_party/sameboy`; intentional upstream upgrades require a new pin,
   manifest, callback review, parity results, and updated dependency notices.
-- The next milestone is a pause-on-write movement lesson plus a sprite/tile
-  inspector. Replay, commercial-ROM support, DMA, audio playback, and additional
-  platforms are not already implemented.
+- Implemented: the pause-on-write movement lesson, sprite/tile bit-plane
+  inspector, memory activity map, and system overview. Next: an interrupt and
+  timer lesson and a background-map view. Replay, commercial-ROM support, DMA,
+  audio playback, and macOS are not implemented.
 
 ## Leave useful continuity
 

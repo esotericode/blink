@@ -74,6 +74,47 @@ kind/frame number/enclosing boundary. It is not a reconstruction from current
 OAM and it is not pixel provenance. A selected old write is evidence displayed
 beside current exact state, never a claimed historical snapshot or replay.
 
+## Run until written
+
+`Engine::runUntilWrite(address, limit)` repeats the same atomic `GB_run` calls
+as stepping. After each call it checks that step's newly captured write
+records for the canonical address (so `$E000` matches `$C000`). It stops at
+that step's end boundary, so the cursor is the instruction boundary after the
+writing instruction (or after interrupt service that pushed to the byte). It
+returns the first matching record, the opcodes executed, outputs completed,
+and ticks advanced. Without capture it refuses and does not advance. At the
+limit (one emulated second from the UI, two to four frames in the lesson) it
+stops at the first boundary past the limit. A test proves the full state
+equals untraced instruction stepping by the same number of opcodes.
+
+## Video storage, previous output, and input
+
+Each snapshot copies VRAM (8 KiB DMG), OAM (160 bytes), and LCDC, STAT, SCY,
+SCX, LY, LYC, BGP, OBP0, OBP1, WY, WX raw storage through public direct access,
+at the same boundary as the CPU state. Tile/OAM/palette decoding in
+`emulator/graphics.*` is pure and operates only on these copies. Shade colours
+are SameBoy's DMG palette mapping (shade n → `colors[3-n]`), so decoded tiles
+and the picture use identical colours. Object colour 0 is shown as
+transparent; the inspector does not model object priority or the 10-per-line
+limit.
+
+The vblank callback keeps the output it replaces as `previousPixels`, numbered
+`previousFrame` (0 when none since reset). Changed-pixel marks compare those
+two real outputs. Sprite outlines come from OAM at the CPU cursor, which can be
+newer than the picture; that difference is the point of lesson step 3.
+
+`heldButtons` reports the buttons the host is holding (keyboard or lesson),
+not a joypad register read.
+
+## Activity map
+
+The engine counts, per 16-bit address, CPU write attempts by bus address (only
+while capture is on; the write callback) and opcode starts by PC (the
+execution callback). Counts cover `[startTicks, endTicks]` since the last clear;
+load, restart, capture toggling, and the Clear button clear them. Copying the
+map does not touch emulator state. It is not a read trace and does not include
+DMA or PPU fetches, which the CPU hooks do not see.
+
 ## Responsibility boundaries
 
 | Area | Owner |
@@ -81,7 +122,9 @@ beside current exact state, never a claimed historical snapshot or replay.
 | CPU execution, memory/hardware behavior, framebuffer production | unchanged SameBoy core |
 | core lifecycle, pacing primitives, inspection, bounded event capture | `src/emulator/engine.*` |
 | copied state/event structures and safe-byte disassembly | `src/emulator/state.hpp`, `disassembly.cpp` |
-| semantic names and curated source notes | `src/teaching/annotations.*`, generated symbols |
+| pure tile, OAM, and palette decoding of copied storage | `src/emulator/graphics.*` |
+| semantic names, curated source notes, region names | `src/teaching/annotations.*`, generated symbols |
+| guided lesson text from real evidence | `src/teaching/lesson.*` |
 | native controls, presentation, wall-clock scheduling, input focus | `src/ui/*` |
 | reproducible original cartridge and boot | `rom/*`, `tools/assemble_rom.py` |
 

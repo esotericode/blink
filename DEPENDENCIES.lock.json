@@ -1,5 +1,5 @@
 {
-  "reference_platform": "Ubuntu 24.04 x86-64",
+  "reference_platform": "Ubuntu 24.04 x86-64 (Linux reference); Windows x64 (MinGW-w64)",
   "ubuntu_package_snapshot": "20260828T000000Z",
   "sameboy": {
     "repository": "https://github.com/LIJI32/SameBoy",
@@ -11,8 +11,16 @@
   "qt": {
     "version": "6.4.2",
     "ubuntu_package_version": "6.4.2+dfsg-21.1build5",
-    "packages": ["qt6-base-dev", "qt6-base-dev-tools", "qt6-qpa-plugins"],
-    "modules": ["Core", "Gui", "Widgets"],
+    "packages": [
+      "qt6-base-dev",
+      "qt6-base-dev-tools",
+      "qt6-qpa-plugins"
+    ],
+    "modules": [
+      "Core",
+      "Gui",
+      "Widgets"
+    ],
     "test_module": "Test",
     "linkage": "shared",
     "minimum_supported": "6.4",
@@ -24,5 +32,36 @@
     "ninja": "1.11.1",
     "python": "3.12.3"
   },
-  "teaching_rom_sha256": "e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672"
+  "teaching_rom_sha256": "e7ef9ff22686174b0ccfabc86e44fd3fcf65561f486cb4f236cb674a69d9d672",
+  "windows": {
+    "ci_runner": "GitHub Actions windows-2025",
+    "qt": {
+      "version": "6.8.3",
+      "arch": "win64_mingw",
+      "source": "official binaries via jurplel/install-qt-action v4.4.1 (aqtinstall 3.3.*)",
+      "modules": [
+        "Core",
+        "Gui",
+        "Widgets"
+      ],
+      "test_module": "Test",
+      "linkage": "shared, deployed by windeployqt"
+    },
+    "toolchain": {
+      "compiler": "MinGW-w64 GCC 13.1.0 (Qt tools_mingw1310)",
+      "generator": "Ninja (Qt tools_ninja)",
+      "unsupported": "MSVC cl.exe (SameBoy core requires GNU C)"
+    },
+    "local_cross_check": {
+      "compiler": "Ubuntu x86_64-w64-mingw32-g++-posix 13",
+      "qt": "6.4.2 qtbase built from https://github.com/qt/qtbase tag v6.4.2",
+      "runner": "Wine 9.0 (Ubuntu 9.0~repack-4build3)"
+    },
+    "package": "CPack ZIP, portable folder"
+  },
+  "ci_actions": {
+    "actions/checkout": "v6.1.0 d23441a48e516b6c34aea4fa41551a30e30af803",
+    "actions/upload-artifact": "v7.0.1 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "jurplel/install-qt-action": "v4.4.1 a9c63c7c123f3069cff414e7e482d95dfa9d8125"
+  }
 }
