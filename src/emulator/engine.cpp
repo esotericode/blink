@@ -18,7 +18,7 @@ struct Engine::Impl {
     std::array<std::uint32_t, screenPixels> rendering{}, completed{}, previous{};
     std::uint64_t ticks{}, instructions{}, frames{}, frameTick{}, eventId{}, evicted{}, previousFrame{};
     std::string frameKind = "No completed frame";
-    bool traceEnabled = true, teaching{}, bankDemo{}, frameArrived{}, inited{}, bootDone{};
+    bool traceEnabled = true, teaching{}, bankDemo{}, frameArrived{}, inited{}, bootDone{}, carriedBatteryDirty{};
     CartridgeInfo cartridge;
     BankMapping mapping;               // Mapping at the start of the current atomic step.
     std::vector<std::uint32_t> bankExecutions;
@@ -277,12 +277,16 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     if (rom.size() < 0x150 || rom.size() > maxRomBytes) {
         throw std::invalid_argument("Not a Game Boy ROM: a cartridge image holds a header at $0100-$014F and is at most 8 MiB.");
     }
+    const auto cartridge = describeCartridge(rom);
+    if (!cartridge.supported) {
+        throw std::invalid_argument("The SameBoy core does not emulate this cartridge controller.");
+    }
     // Make a copy before resetting, including when restart() passes the existing vector.
     std::vector<std::uint8_t> copy(rom.begin(), rom.end());
     auto same = [&](const auto& bundled) { return copy.size() == bundled.size() && std::equal(copy.begin(), copy.end(), bundled.begin()); };
     s.teaching = same(demo::rom);
     s.bankDemo = same(bankdemo::rom);
-    s.cartridge = describeCartridge(copy);
+    s.cartridge = cartridge;
     if (s.inited) GB_free(&s.gb);
     // Stable startup noise for reproducible lessons; not a claim about power-on RAM.
     GB_random_seed(0x434F4E534F4C45ull);
@@ -311,29 +315,52 @@ void Engine::loadRom(std::span<const std::uint8_t> rom) {
     s.history.clear(); s.active.reset(); s.lastExecuted.reset(); s.activity = {};
     s.dmaHistory.clear(); s.dmaPending.reset(); s.dmaId = 0;
     s.held = 0; s.clearMap();
+    s.carriedBatteryDirty = false;
     s.frameKind = "No completed frame";
 }
 void Engine::restart() {
     // Like switching a Game Boy off and on: the battery keeps cartridge RAM.
     const auto battery = batteryData();
+    const bool dirty = batteryDirty();
     loadRom(impl_->rom);
     if (!battery.empty()) loadBattery(battery);
+    impl_->carriedBatteryDirty = dirty && !battery.empty();
 }
 std::vector<std::uint8_t> Engine::batteryData() const {
     auto& s = *impl_; s.assertOwner();
-    if (!s.cartridge.battery) return {};
     const int size = GB_save_battery_size(const_cast<GB_gameboy_t*>(&s.gb));
     if (size <= 0) return {};
     std::vector<std::uint8_t> data(static_cast<std::size_t>(size));
     GB_save_battery_to_buffer(const_cast<GB_gameboy_t*>(&s.gb), data.data(), data.size());
     return data;
 }
-void Engine::loadBattery(std::span<const std::uint8_t> data) {
+bool Engine::loadBattery(std::span<const std::uint8_t> data) {
     auto& s = *impl_; s.assertOwner();
-    if (s.cartridge.battery && !data.empty()) GB_load_battery_from_buffer(&s.gb, data.data(), data.size());
+    const auto ram = s.cartRamBytes();
+    const int expected = GB_save_battery_size(&s.gb);
+    if (expected <= 0 || data.empty() || data.size() < ram) return false;
+    const auto footer = data.size() - ram;
+    const auto nativeFooter = std::size_t(expected) - ram;
+    // These are the formats read by the pinned Core/gb.c loader. Its generic
+    // RTC union copy uses total size, not footer size, so legacy inputs need
+    // backing storage for the full 48-byte union while retaining logical size.
+    const bool genericClock = s.cartridge.timer && s.cartridge.mbc != Mbc::Huc3 && s.cartridge.mbc != Mbc::Tpp1;
+    const auto legacyFooter = sizeof(GB_rtc_time_t) + sizeof(time_t);
+    if (footer != 0 && footer != nativeFooter && !(genericClock && (footer == legacyFooter || footer == 44))) return false;
+    if (!s.cartridge.timer && footer != 0) return false;
+    if (genericClock && footer != 0 && footer < 48) {
+        std::vector<std::uint8_t> padded(ram + 48, 0);
+        std::copy(data.begin(), data.end(), padded.begin());
+        GB_load_battery_from_buffer(&s.gb, padded.data(), data.size());
+    } else {
+        GB_load_battery_from_buffer(&s.gb, data.data(), data.size());
+    }
+    GB_clear_battery_dirty(&s.gb);
+    s.carriedBatteryDirty = false;
+    return true;
 }
-bool Engine::batteryDirty() const { impl_->assertOwner(); return GB_get_battery_dirty(const_cast<GB_gameboy_t*>(&impl_->gb)); }
-void Engine::clearBatteryDirty() { impl_->assertOwner(); GB_clear_battery_dirty(&impl_->gb); }
+bool Engine::batteryDirty() const { impl_->assertOwner(); return impl_->carriedBatteryDirty || GB_get_battery_dirty(const_cast<GB_gameboy_t*>(&impl_->gb)); }
+void Engine::clearBatteryDirty() { impl_->assertOwner(); GB_clear_battery_dirty(&impl_->gb); impl_->carriedBatteryDirty = false; }
 void Engine::setButton(Button button, bool down) {
     impl_->assertOwner();
     GB_set_key_state(&impl_->gb, static_cast<GB_key_t>(button), down);

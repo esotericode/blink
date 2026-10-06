@@ -54,7 +54,7 @@ const Map& entries() {
             "Switch the console off and on again with the same cartridge. Battery-backed save memory is kept, as on "
             "a real cartridge.", {}}},
         {"action.capture", {"Capture writes",
-            "Record each CPU write (the newest 4,096 by default) with the instruction that made it, and every OAM DMA copy. "
+            "Record CPU write attempts (the newest 4,096 by default) with the instruction when known, and observed OAM DMA requests. "
             "\"Last writer\" answers and Run until written depend on it.",
             "Switching it off or on starts a fresh record, so old answers cannot go stale."}},
         {"action.open", {"Open ROM · Ctrl+O",
@@ -69,6 +69,10 @@ const Map& entries() {
         {"action.savebattery", {"Save battery RAM · Ctrl+S",
             "Write the cartridge's save memory to the .sav file next to the ROM now.",
             "It is also saved automatically every few seconds while it changes, and on exit."}},
+        {"action.savebatteryas", {"Save battery RAM elsewhere",
+            "Choose another .sav destination for the current game. Use this if its folder is unwritable or an existing save could not be loaded. Saving successfully keeps future autosaves at the new location.", {}}},
+        {"cart.save", {"Battery save status",
+            "Shows the destination, unsaved progress, and persistent errors. A failed save keeps this game open. An unreadable or malformed existing save is protected from automatic overwrite; save elsewhere to keep new progress.", {}}},
         {"action.sprites", {"Sprite outlines",
             "Draw a box where the sprite table (OAM) places each sprite right now. After the CPU moves a sprite, the "
             "box moves first; the picture catches up when the next frame is drawn.", {}}},
@@ -82,12 +86,12 @@ const Map& entries() {
 
         // Status and picture.
         {"ui.badge", {"Paused or running",
-            "While paused, every panel shows one exact moment. While running, panels refresh about 30 times a second.",
+            "CPU and memory share one boundary. Pictures and captured evidence have their own labeled times. Running panels refresh about 30 times a second.",
             {}}},
         {"ui.cursor", {"The shared moment",
             "t is emulated time since power-on, in ticks of 1/8,388,608 s (two per CPU clock cycle). Instruction # "
             "counts instructions run; output # counts finished screen pictures.",
-            "All panels describe the machine at this exact point."}},
+            "State inspectors share this boundary; the completed picture and past events have separate times."}},
         {"ui.game", {"The Game Boy screen",
             "The most recently finished 160×144 picture. When you step instruction by instruction it only changes "
             "once the console finishes drawing a new frame.",
@@ -96,7 +100,7 @@ const Map& entries() {
             "Pictures arrive once per frame, so the one on screen can be older than the CPU's current moment. "
             "\"VBlank frame\" is a normal finished picture.", {}}},
         {"ui.activity", {"Last update",
-            "What happened since the previous refresh: instructions run, and CPU writes into each kind of memory.", {}}},
+            "Opcodes and captured CPU write attempts in the last published interval. Browsing while paused keeps that interval visible.", {}}},
 
         // CPU registers and flags.
         {"reg.af", {"AF · accumulator and flags",
@@ -126,7 +130,7 @@ const Map& entries() {
             "Set when a result carried out of the low four bits. Used for decimal (BCD) arithmetic, such as score counters.",
             {}}},
         {"flag.c", {"C · carry flag",
-            "Set when a result went past 255 or below 0. After CP n (compare), C = 1 means A was smaller than n.", {}}},
+            "Depends on the instruction: an addition carry, a subtraction borrow, or the bit shifted out by a rotate or shift. After CP n, C = 1 means A was smaller than n.", {}}},
         {"cpu.instruction", {"Next and last instruction",
             "Next: the instruction stored at PC, which runs on the next step. Last: the one that just ran. On banked "
             "cartridges the bank is shown, because the same address can hold different code.",
@@ -189,9 +193,9 @@ const Map& entries() {
         {"cart.facts", {"Cartridge header",
             "Facts the cartridge declares about itself at $0100–$014F: its title, controller type, ROM and RAM size, "
             "and a checksum of the header.", {}}},
-        {"cart.window.rom0", {"$0000–$3FFF · fixed ROM window",
+        {"cart.window.rom0", {"$0000–$3FFF · lower ROM window",
             "The first 16 KiB of cartridge ROM the CPU can see. It is almost always bank 0, which holds the startup "
-            "code and routines the game needs at all times.", "Click to view it in the Memory panel."}},
+            "code and common routines. Some controllers can remap it in particular modes.", "Click to view it in the Memory panel."}},
         {"cart.window.romx", {"$4000–$7FFF · switchable ROM window",
             "The second 16 KiB window. On cartridges with a bank controller (MBC), the game chooses which 16 KiB bank "
             "appears here by writing a bank number to a ROM address.", "Click to view it in the Memory panel."}},
@@ -242,8 +246,8 @@ const Map& entries() {
         {"tiles.pixels", {"Colour numbers",
             "Each pixel's two bits combined: high bit × 2 + low bit gives 0–3. The palette then picks the shade.", {}}},
         {"tiles.source", {"Where OAM's contents came from",
-            "Either CPU stores into $FE00–$FE9F, or an OAM DMA copy: the hardware copying 160 bytes from a table "
-            "elsewhere (usually work RAM) in one go.", "Click the source address to see who wrote that table."}},
+            "OAM can change through CPU stores or a hardware DMA copy. This view shows captured requests and later storage comparisons, not a per-byte transfer trace.",
+            "Click a source address for its current retained write evidence."}},
 
         // Memory map.
         {"map.view", {"Memory map",
@@ -284,9 +288,8 @@ std::size_t glossarySize() { return entries().size(); }
 bool glossaryHas(const std::string& key) { return entries().count(key) != 0; }
 
 Explanation regionExplanation(std::uint16_t a) {
-    if (a < 0x4000) return {"Cartridge ROM · fixed window",
-        "Read-only program and data from the cartridge. This first 16 KiB, usually bank 0, is always visible: it "
-        "holds the startup code and the routines a game needs at all times.", {}};
+    if (a < 0x4000) return {"Cartridge ROM · lower window",
+        "Read-only program and data from the cartridge, usually bank 0. Some controllers can remap this 16 KiB window in particular modes; the inspector shows the current bank.", {}};
     if (a < 0x8000) return {"Cartridge ROM · switchable window",
         "Another 16 KiB of the cartridge. If the cartridge has a bank controller (MBC), the game chooses which bank "
         "appears here, so the same address can hold different code at different times.", {}};
@@ -333,7 +336,7 @@ Explanation ioRegisterExplanation(std::uint16_t a) {
     case 0xFF07: return {"TAC · timer control", "Turns the timer on and picks its speed: 4,096, 16,384, 65,536 or 262,144 counts per second.", {}};
     case 0xFF0F: return {"IF · interrupt requests",
         "One bit per interrupt source (VBlank, LCD status, timer, serial, joypad). Hardware sets a bit to ask for "
-        "attention; the CPU answers if the matching IE bit is on.", {}};
+        "attention. Service needs the matching IE bit and the CPU's master interrupt enable (IME); a request can stay pending.", {}};
     case 0xFF40: return {"LCDC · display control",
         "Switches the screen, background, window and sprites on or off, and picks sprite size and which tile "
         "data and maps to use.", {}};
