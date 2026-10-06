@@ -1,0 +1,8 @@
+# Check out identical bytes on every platform. Vendored SameBoy sources are
+# verified by SHA-256, and ROM/header generation must be reproducible, so Git
+# for Windows must not convert line endings to CRLF.
+* text=auto eol=lf
+*.ico binary
+*.png binary
+*.gb binary
+*.bin binary
